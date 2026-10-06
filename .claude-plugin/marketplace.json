@@ -1,0 +1,14 @@
+{
+	"name": "leverage",
+	"owner": {
+		"name": "Leverage Computer"
+	},
+	"description": "The Leverage plugin for Claude Code",
+	"plugins": [
+		{
+			"name": "leverage",
+			"source": "./",
+			"description": "Runs Claude Code as a client of a Leverage session"
+		}
+	]
+}
