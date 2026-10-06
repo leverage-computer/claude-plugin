@@ -39,11 +39,13 @@ space, it is private until you share it.
   prompt in Claude Code's queue, where you can edit it or take it back, until
   its turn starts.
 - **Approvals and questions** show in Claude Code's own dialogs.
+- **Subagents** run as Claude Code's own agents: their steps show under the
+  Agent call and in Claude Code's agents view.
 - **The Leverage pane** lists your spaces, their sessions and connections.
   Press a session to open it in this window. `/leverage` opens the pane again.
 - **`/leverage help`** lists the actions: approvals, rename, archive and
   restore, model and effort, the queue, outputs, files, a shell command, changes
-  and pull requests, skills, subagents, connectors and history. `/compact` and
+  and pull requests, skills, connectors and history. `/compact` and
   `/rename` act on the Leverage session.
 
 ## Your token

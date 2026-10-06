@@ -68,6 +68,30 @@ function fakeLeverage(on: On) {
 			histories.push(id ?? "");
 			answer = { messages: [], before: null };
 		}
+		// The turn starts a subagent in Leverage.
+		if (action === "step") {
+			answer = {
+				blocks: [
+					{
+						kind: "tool",
+						id: "agent-1",
+						name: "Task",
+						input: { prompt: "Look at checkout" },
+						agent: {
+							task: "t-1",
+							description: "Find the flake",
+							prompt: "Look at checkout",
+							type: "Explore",
+						},
+					},
+				],
+				stop: "tool_use",
+				cursor: 9,
+				turnId: "turn-1",
+				context: null,
+				question: null,
+			};
+		}
 		// Grace has the session open in Codex, idle, and Ada types in the web app.
 		if (action === "prompts") {
 			answer = {
@@ -166,3 +190,37 @@ for (const surface of ["terminal", "desktop"] as const) {
 		).resolves.toBeDefined();
 	});
 }
+
+test("a Leverage subagent's call is Claude Code's own Agent call", async ($, on) => {
+	fakeLeverage(on);
+	on("session.start", ($, e) => ({ cwd: e.cwd }));
+	for (const event of [
+		"tool.register",
+		"command.register",
+		"ui.open",
+		"ui.status",
+	] as const)
+		on(event, () => ({ value: {} }) as never);
+	await $.session.start({
+		cwd: "/work",
+		surface: "terminal",
+		isInteractive: true,
+	});
+	const chunks = [];
+	for await (const chunk of $.turn.step({
+		turnId: "turn-1",
+		index: 0,
+		model: "leverage",
+		messageCount: 1,
+	}))
+		chunks.push(chunk);
+	expect(chunks).toContainEqual(
+		expect.objectContaining({ kind: "tool", id: "agent-1", name: "Agent" }),
+	);
+	const input = chunks.find((chunk) => chunk.kind === "input");
+	expect(JSON.parse(input && "json" in input ? input.json : "{}")).toEqual({
+		description: "Find the flake",
+		prompt: "Look at checkout",
+		subagent_type: "general-purpose",
+	});
+});

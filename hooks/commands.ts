@@ -23,8 +23,6 @@ const HELP = `/leverage                 open the pane: spaces, sessions, connect
 /leverage changes         each repository's changes and pull request
 /leverage skills          the skills this session can load
 /leverage skill <name> <prompt>  send a prompt that loads a skill
-/leverage tasks           the subagents this session started
-/leverage task <n>        one subagent's work
 /leverage connectors      the workspace's connectors
 /leverage history [more]  the session's last turns, then older ones`;
 
@@ -32,8 +30,6 @@ const HELP = `/leverage                 open the pane: spaces, sessions, connect
 const SHOWN_CHARS = 20_000;
 /** Where the next older page of history starts, once one was shown. */
 let olderFrom: number | null = null;
-/** The subagents `/leverage tasks` listed last, by their number there. */
-let listedTasks: string[] = [];
 
 async function call<T>(
 	$: EngineInterface,
@@ -316,38 +312,6 @@ async function run($: EngineInterface, args: string): Promise<string> {
 			here.skill = name;
 			await $.prompt.submit({ text: prompt, asUser: true });
 			return `Sent with the ${name} skill.`;
-		}
-		case "tasks": {
-			const tasks = await call<
-				{
-					id: string;
-					description: string;
-					agentPath: string;
-					running: boolean;
-				}[]
-			>($, `/sessions/${here.id}/tasks`);
-			listedTasks = tasks.map((task) => task.id);
-			return tasks.length === 0
-				? "This session started no subagent."
-				: `${tasks
-						.map(
-							(task, index) =>
-								`${index + 1}. ${task.running ? "●" : "○"} ${task.description || task.agentPath || task.id}`,
-						)
-						.join("\n")}\n/leverage task <n> shows one.`;
-		}
-		case "task": {
-			const id = listedTasks[Number(tail) - 1];
-			if (!id) return "List them first: /leverage tasks";
-			const task = await call<{
-				description: string;
-				status: string;
-				messages: { text: string }[];
-			}>($, `/tasks/${id}`);
-			return [
-				`${task.description} (${task.status})`,
-				...task.messages.map((message) => message.text),
-			].join("\n\n");
 		}
 		case "history": {
 			if (tail === "more" && olderFrom === null) return "No older turns.";

@@ -21,7 +21,19 @@ import { registerPeople } from "./people";
 type Block =
 	| { kind: "text"; text: string }
 	| { kind: "thinking"; text: string }
-	| { kind: "tool"; id: string; name: string; input: Record<string, unknown> };
+	| {
+			kind: "tool";
+			id: string;
+			name: string;
+			input: Record<string, unknown>;
+			/** The Leverage subagent the call started. */
+			agent?: {
+				task: string;
+				description: string;
+				prompt: string;
+				type: string | null;
+			};
+	  };
 type Waiting = {
 	writable: boolean;
 	approvals: { id: string; tool: string; input: unknown }[];
@@ -82,6 +94,9 @@ let seenRoom = "";
 /** Prompts asked to wait, still in Claude Code's queue, oldest first. */
 const waiting: { text: string; skills: { name: string }[]; pasted: boolean }[] =
 	[];
+
+/** The subagents Claude Code is starting for Leverage, until each has its id. */
+const spawning = new Set<Promise<unknown>>();
 
 /** The status line: the session, and what runs in the background. */
 function line(): string {
@@ -478,8 +493,22 @@ export const register: Register = (on) => {
 	});
 
 	on("prompt.submit", async ($, e, next) => {
-		// A plugin's prompt is a teammate's, already sent, unless it carries a skill.
-		if (!isConnected() || (e.origin.kind === "plugin" && !here.skill)) {
+		if (!isConnected()) return next(e);
+		// Only what a person writes goes to Leverage. A plugin's prompt is a
+		// teammate's, already sent, unless it carries a skill.
+		const person = e.origin.kind === "composer" || e.origin.kind === "bridge";
+		// Leverage's turn took a subagent's report already; no turn reads it here.
+		const report =
+			[...here.loops.keys()].some((id) =>
+				e.text.includes(`<agent-message from="${id}">`),
+			) ||
+			[...here.agents.keys()].some((id) =>
+				e.text.includes(`<tool-use-id>${id}</tool-use-id>`),
+			);
+		if (!person && report) {
+			return { drop: "Leverage's turn has the subagent's report." };
+		}
+		if (!person && !(e.origin.kind === "plugin" && here.skill)) {
 			return next(e);
 		}
 		const skills = here.skill ? [{ name: here.skill }] : [];
@@ -555,8 +584,37 @@ export const register: Register = (on) => {
 			: next(e),
 	);
 
+	// Claude Code runs a Leverage subagent as its own agent. Its steps come
+	// from the subagent's rows in Leverage.
+	on("agent.spawn", async ($, e, next) => {
+		const subagent = here.agents.get(e.tool_use_id);
+		if (!isConnected() || !subagent) return next(e);
+		// In the foreground, as in Leverage: the turn goes on once it ends.
+		const started = next({ ...e, background: false });
+		spawning.add(started);
+		try {
+			const spawned = await started;
+			if (spawned.agentId) here.loops.set(spawned.agentId, subagent);
+			return spawned;
+		} finally {
+			spawning.delete(started);
+		}
+	});
+
+	// Leverage ran the subagent already, so Claude Code asks nobody about it.
+	on("tool.check", { tool: "Agent" }, ($, e, next) =>
+		isConnected() && here.agents.has(e.tool_use_id ?? "")
+			? { decision: "allow" }
+			: next(e),
+	);
+
 	on("turn.step", async function* ($, e, next) {
 		if (!isConnected()) return yield* next(e);
+		// A subagent's first step can come before its spawn names it.
+		if (e.agentId && !here.loops.has(e.agentId))
+			await Promise.allSettled([...spawning]);
+		const subagent = e.agentId ? here.loops.get(e.agentId) : undefined;
+		if (e.agentId && !subagent) return yield* next(e);
 		let step: Exclude<Step, { pending: true }>;
 		// Each message drawn as it arrives, at the block index it took.
 		const streamed: {
@@ -574,9 +632,12 @@ export const register: Register = (on) => {
 			const drawn = streamed.map((entry) => `${entry.id}:${entry.text.length}`);
 			const shown =
 				drawn.length > 0 ? `&shown=${encodeURIComponent(drawn.join(","))}` : "";
+			// A subagent's rows are stored whole, so its steps do not stream.
 			const answer = await call<Step>(
 				$,
-				`/sessions/${here.id}/step?after=${here.cursor}&stream=true${skip}${known}${shown}`,
+				subagent
+					? `/sessions/${here.id}/step?after=${subagent.cursor}&task=${encodeURIComponent(subagent.task)}${known}`
+					: `/sessions/${here.id}/step?after=${here.cursor}&stream=true${skip}${known}${shown}`,
 			);
 			if (!("pending" in answer)) {
 				step = answer;
@@ -596,11 +657,16 @@ export const register: Register = (on) => {
 				if (piece) yield { kind: entry.kind, index: entry.index, text: piece };
 			}
 		}
-		here.cursor = step.cursor;
-		here.turnId = step.turnId;
-		here.question = step.question;
-		// A first turn names the session.
-		if (step.stop === "end_turn") void showLabel($);
+		if (subagent) {
+			subagent.cursor = step.cursor;
+			if (step.question) here.question = step.question;
+		} else {
+			here.cursor = step.cursor;
+			here.turnId = step.turnId;
+			here.question = step.question;
+			// A first turn names the session.
+			if (step.stop === "end_turn") void showLabel($);
+		}
 		let answer = "";
 		const toolUses: { name: string; input: unknown }[] = [];
 		let matched = 0;
@@ -619,21 +685,44 @@ export const register: Register = (on) => {
 					yield { kind: block.kind, index: index++, text: block.text };
 				}
 			} else {
-				const name = localName(block.name);
-				const input = localInput(name, block);
+				const name = block.agent ? "Agent" : localName(block.name);
+				const input = block.agent
+					? {
+							description: block.agent.description || "Leverage subagent",
+							prompt: block.agent.prompt,
+							// Explore runs in the background; Leverage's subagents block their turn.
+							subagent_type: "general-purpose",
+						}
+					: localInput(name, block);
+				if (block.agent) {
+					here.agents.set(block.id, {
+						task: block.agent.task,
+						cursor: step.cursor,
+					});
+				}
 				here.calls.add(block.id);
 				toolUses.push({ name, input });
 				yield { kind: "tool", index, id: block.id, name };
 				yield { kind: "input", index: index++, json: JSON.stringify(input) };
 			}
 		}
-		yield { kind: "stop", stopReason: step.stop, usage: usage(step.context) };
+		// A subagent ends its run in Claude Code by handing its report back.
+		let stop = step.stop;
+		if (subagent && stop === "end_turn") {
+			const input = { message: answer || "Done." };
+			toolUses.push({ name: "SubagentHandback", input });
+			const id = `toolu_handback_${subagent.task.replace(/\W/g, "_")}`;
+			yield { kind: "tool", index, id, name: "SubagentHandback" };
+			yield { kind: "input", index: index++, json: JSON.stringify(input) };
+			stop = "tool_use";
+		}
+		yield { kind: "stop", stopReason: stop, usage: usage(step.context) };
 		return {
 			turnId: e.turnId,
 			index: e.index,
 			answer,
 			toolUses,
-			stopReason: step.stop,
+			stopReason: stop,
 			usage: usage(step.context),
 		};
 	});
@@ -641,6 +730,8 @@ export const register: Register = (on) => {
 	on("tool.call", async ($, e, next) => {
 		const id = e.tool_use_id ?? "";
 		if (!isConnected() || !here.calls.has(id)) return next(e);
+		// Claude Code runs the subagent; its steps come from Leverage.
+		if (here.agents.has(id)) return next(e);
 		const asked = here.question === id;
 		if (asked) here.question = null;
 		if (e.tool === "AskUserQuestion" && asked) {

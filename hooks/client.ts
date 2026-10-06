@@ -33,7 +33,14 @@ export const here = {
 	skill: null as string | null,
 	/** When this person last told Leverage they type; 0 when they do not. */
 	typedAt: 0,
+	/** Each Leverage subagent and the last row of it drawn, by its Agent call. */
+	agents: new Map<string, Subagent>(),
+	/** The same subagents, by the Claude Code agent that runs each. */
+	loops: new Map<string, Subagent>(),
 };
+
+/** A Leverage subagent that Claude Code runs as its own agent. */
+export type Subagent = { task: string; cursor: number };
 
 /** The prompts this window sent or already drew. */
 export const drawn = new Set<string>();
@@ -77,6 +84,8 @@ export function follow(id: string, cursor: number) {
 	here.known.clear();
 	here.question = null;
 	here.typedAt = 0;
+	here.agents.clear();
+	here.loops.clear();
 }
 
 export function leverageRequest(
