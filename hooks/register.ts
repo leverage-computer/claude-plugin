@@ -706,9 +706,9 @@ export const register: Register = (on) => {
 		}
 		if (result.isError) return { deny: result.content };
 		const { tool, tool_use_id: _, ...input } = e as Record<string, unknown>;
-		const line = tool === "Edit" ? await editLine($, input) : 1;
+		const startLine = tool === "Edit" ? await editLine($, input) : 1;
 		const shaped = NATIVE.has(String(tool))
-			? nativeResult(String(tool), input, result.content, line)
+			? nativeResult(String(tool), input, result.content, startLine)
 			: result.content;
 		return { result: shaped as never };
 	});
