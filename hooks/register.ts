@@ -3,12 +3,15 @@ import { update } from "claude-code";
 
 import type { Room, WorkspaceTree } from "../types";
 import {
-	connect,
+	connectKept,
+	connectLaunched,
 	drawn,
 	follow,
 	here,
-	isConnected,
+	isClient,
+	LEVERAGE_TOOLS,
 	leverageRequest,
+	MIRRORED,
 	space,
 } from "./client";
 import { registerCommands } from "./commands";
@@ -61,21 +64,6 @@ type Result =
 
 // Remote tools with a local twin whose output shape the mod can build.
 const NATIVE = new Set(["Bash", "Read", "Edit", "Write"]);
-// Remote tools drawn as tools of this mod. Others go to `remote_tool`.
-const MIRRORED = [
-	"Grep",
-	"Glob",
-	"Task",
-	"Agent",
-	"TodoWrite",
-	"WebFetch",
-	"WebSearch",
-	"NotebookEdit",
-	"Skill",
-	"ExitPlanMode",
-	"ToolSearch",
-	"leverage_execute",
-];
 const usage = (context: number | null) => ({
 	input_tokens: context ?? 0,
 	output_tokens: 0,
@@ -378,6 +366,15 @@ function nativeResult(
 	return content;
 }
 
+/** The Leverage CLI's config, where it keeps its Claude Code token; or "{}". */
+async function keptConfig($: EngineInterface): Promise<string> {
+	const home = await $.env.get("HOME");
+	const dir =
+		(await $.env.get("LEVERAGE_CONFIG_DIR")) ||
+		`${(await $.env.get("XDG_CONFIG_HOME")) || `${home}/.config`}/leverage`;
+	return $.fs.read(`${dir}/config.json`).catch(() => "{}");
+}
+
 export const register: Register = (on) => {
 	registerPane(on);
 	registerCommands(on);
@@ -385,39 +382,36 @@ export const register: Register = (on) => {
 
 	on("session.start", async ($, e, next) => {
 		const result = await next(e);
-		const connected = connect({
-			url: await $.env.get("LEVERAGE_CLAUDE_URL"),
-			token: await $.env.get("LEVERAGE_CLAUDE_TOKEN"),
-			space: await $.env.get("LEVERAGE_CLAUDE_SPACE"),
-			session: await $.env.get("LEVERAGE_CLAUDE_SESSION"),
-		});
-		if (!connected) return result;
-		for (const name of [...MIRRORED, "remote_tool"]) {
-			await $.tool.register({
-				name,
-				description: `${name}, run by the Leverage session.`,
-				inputSchema: { type: "object", additionalProperties: true },
-			});
-		}
-		// A window opened on a session starts at its newest row.
-		if (here.id) {
-			const opened = await call<{ id: string; cursor: number }>(
-				$,
-				`/sessions/${here.id}`,
-			);
-			follow(opened.id, opened.cursor);
-			await open($);
-		}
-		await showLabel($);
 		await $.command.register({
 			name: "leverage",
 			description: "The Leverage session: pane, approvals, files, model…",
 			argumentHint: "[help]",
 		});
+		const launched = connectLaunched({
+			url: await $.env.get("LEVERAGE_CLAUDE_URL"),
+			token: await $.env.get("LEVERAGE_CLAUDE_TOKEN"),
+			space: await $.env.get("LEVERAGE_CLAUDE_SPACE"),
+			session: await $.env.get("LEVERAGE_CLAUDE_SESSION"),
+		});
+		// Any other window, as Claude Desktop's, reads the token the CLI keeps.
+		if (!launched && !connectKept(await keptConfig($))) return result;
+		if (launched) {
+			for (const tool of LEVERAGE_TOOLS) await $.tool.register(tool);
+			// A window opened on a session starts at its newest row.
+			if (here.id) {
+				const opened = await call<{ id: string; cursor: number }>(
+					$,
+					`/sessions/${here.id}`,
+				);
+				follow(opened.id, opened.cursor);
+				await open($);
+			}
+			await showLabel($);
+		}
 		void $.ui.open({ id: PANE, title: "Leverage" });
 		// Turns started from another client open a turn here, so both show it.
 		$.clock.every(1500, async () => {
-			if (!here.id) return;
+			if (!isClient() || !here.id) return;
 			const { prompts, notices, last, viewers, typing } = await call<
 				{
 					prompts: {
@@ -493,7 +487,7 @@ export const register: Register = (on) => {
 	});
 
 	on("prompt.submit", async ($, e, next) => {
-		if (!isConnected()) return next(e);
+		if (!isClient()) return next(e);
 		// Only what a person writes goes to Leverage. A plugin's prompt is a
 		// teammate's, already sent, unless it carries a skill.
 		const person = e.origin.kind === "composer" || e.origin.kind === "bridge";
@@ -540,7 +534,7 @@ export const register: Register = (on) => {
 	// A prompt that waited in Claude Code's queue goes when its turn starts.
 	on("turn.start", async ($, e, next) => {
 		const result = await next(e);
-		if (!isConnected()) return result;
+		if (!isClient()) return result;
 		const at = waiting.findIndex((one) => one.text === e.text);
 		if (at < 0) return result;
 		const [prompt] = waiting.splice(at, 1);
@@ -552,7 +546,7 @@ export const register: Register = (on) => {
 
 	// Esc here stops the turn in the sandbox too.
 	on("turn.complete", async ($, e, next) => {
-		if (isConnected() && here.id && e.reason === "aborted") {
+		if (isClient() && here.id && e.reason === "aborted") {
 			here.skip = here.turnId;
 			await call($, `/sessions/${here.id}/stop`, {});
 		}
@@ -561,7 +555,7 @@ export const register: Register = (on) => {
 
 	// The Leverage session holds the context, so it compacts, not this window.
 	on("session.compact", async ($, e, next) => {
-		if (!isConnected()) return next(e);
+		if (!isClient()) return next(e);
 		if (e.trigger !== "manual" || !here.id) {
 			return { skip: "The Leverage session compacts itself." };
 		}
@@ -571,7 +565,7 @@ export const register: Register = (on) => {
 
 	// One window shows one Leverage session, so these act on Leverage.
 	on("command.run", { command: "rename" }, async ($, e, next) => {
-		if (!isConnected() || !here.id) return next(e);
+		if (!isClient() || !here.id) return next(e);
 		const title = e.args.trim();
 		if (!title) return { text: "Name the session: /rename <title>" };
 		await call($, `/sessions/${here.id}/rename`, { title });
@@ -579,7 +573,7 @@ export const register: Register = (on) => {
 		return { text: `Renamed the Leverage session to ${title}.` };
 	});
 	on("command.run", { command: "resume" }, ($, e, next) =>
-		isConnected()
+		isClient()
 			? { text: "/leverage opens another Leverage session in this window." }
 			: next(e),
 	);
@@ -588,7 +582,7 @@ export const register: Register = (on) => {
 	// from the subagent's rows in Leverage.
 	on("agent.spawn", async ($, e, next) => {
 		const subagent = here.agents.get(e.tool_use_id);
-		if (!isConnected() || !subagent) return next(e);
+		if (!isClient() || !subagent) return next(e);
 		// In the foreground, as in Leverage: the turn goes on once it ends.
 		const started = next({ ...e, background: false });
 		spawning.add(started);
@@ -603,13 +597,13 @@ export const register: Register = (on) => {
 
 	// Leverage ran the subagent already, so Claude Code asks nobody about it.
 	on("tool.check", { tool: "Agent" }, ($, e, next) =>
-		isConnected() && here.agents.has(e.tool_use_id ?? "")
+		isClient() && here.agents.has(e.tool_use_id ?? "")
 			? { decision: "allow" }
 			: next(e),
 	);
 
 	on("turn.step", async function* ($, e, next) {
-		if (!isConnected()) return yield* next(e);
+		if (!isClient()) return yield* next(e);
 		// A subagent's first step can come before its spawn names it.
 		if (e.agentId && !here.loops.has(e.agentId))
 			await Promise.allSettled([...spawning]);
@@ -729,7 +723,7 @@ export const register: Register = (on) => {
 
 	on("tool.call", async ($, e, next) => {
 		const id = e.tool_use_id ?? "";
-		if (!isConnected() || !here.calls.has(id)) return next(e);
+		if (!isClient() || !here.calls.has(id)) return next(e);
 		// Claude Code runs the subagent; its steps come from Leverage.
 		if (here.agents.has(id)) return next(e);
 		const asked = here.question === id;

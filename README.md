@@ -28,6 +28,10 @@ leverage claude --session <id>
 The first prompt starts a session in the space. Like every new session in a
 space, it is private until you share it.
 
+Any other Claude Code window, as one in Claude Desktop, shows the Leverage pane
+once `leverage claude` has run on this machine. The window stays Claude Code's
+own until you press a session in the pane; from then on it runs that session.
+
 ## What you get
 
 - **One session, two places.** Text and thinking stream as Leverage writes
@@ -55,8 +59,9 @@ space, it is private until you share it.
 ## Your token
 
 `leverage claude` keeps a Claude Code token for your workspace and starts
-Claude Code with it. The plugin acts only with that token. In any other Claude
-Code session it does nothing. To revoke the token, open Leverage Settings →
+Claude Code with it. Other Claude Code windows read the same token from the
+Leverage CLI's config. The plugin acts only with that token; without one,
+`/leverage` says how to get it. To revoke the token, open Leverage Settings →
 External harnesses → Claude Code.
 
 ## License

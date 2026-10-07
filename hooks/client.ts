@@ -45,17 +45,19 @@ export type Subagent = { task: string; cursor: number };
 /** The prompts this window sent or already drew. */
 export const drawn = new Set<string>();
 
+/** Whether this window runs a Leverage session's turns, not only the pane. */
+let isClientWindow = false;
+
 /**
- * Takes the connection `leverage claude` starts Claude Code with. Without a
- * token there is none, and every hook passes.
+ * Takes the connection `leverage claude` starts Claude Code with. Such a
+ * window runs a session's turns at once.
  */
-export function connect(env: {
+export function connectLaunched(env: {
 	url: string | undefined;
 	token: string | undefined;
 	space: string | undefined;
 	session: string | undefined;
 }): boolean {
-	if (connection) return true;
 	if (!env.url || !env.token) return false;
 	connection = {
 		url: env.url.replace(/\/+$/, ""),
@@ -63,11 +65,82 @@ export function connect(env: {
 		space: env.space || null,
 	};
 	if (env.session) here.id = env.session;
+	isClientWindow = true;
 	return true;
 }
 
-export function isConnected(): boolean {
+/**
+ * Takes the Claude Code token the Leverage CLI keeps in its config, so any
+ * window, as Claude Desktop's, lists the sessions in the pane. The window
+ * runs a session's turns only once the person opens one there.
+ */
+export function connectKept(config: string): boolean {
+	let parsed: {
+		currentHost?: string;
+		hosts?: Record<
+			string,
+			{
+				workspaceId?: string;
+				accessTokens?: Record<string, Record<string, string>>;
+			}
+		>;
+	};
+	try {
+		parsed = JSON.parse(config);
+	} catch {
+		return false;
+	}
+	const hosts = parsed.hosts ?? {};
+	// The signed-in host first, then any other that keeps one.
+	for (const host of [parsed.currentHost, ...Object.keys(hosts)]) {
+		if (!host) continue;
+		const profile = hosts[host];
+		const token = profile?.workspaceId
+			? profile.accessTokens?.claude?.[profile.workspaceId]
+			: undefined;
+		if (!token) continue;
+		connection = { url: host.replace(/\/+$/, ""), token, space: null };
+		return true;
+	}
+	return false;
+}
+
+/** From now on, this window runs the turns of the session it follows. */
+export function becomeClient() {
+	isClientWindow = true;
+}
+
+// Remote tools drawn as tools of this mod. Others go to `remote_tool`.
+export const MIRRORED = [
+	"Grep",
+	"Glob",
+	"Task",
+	"Agent",
+	"TodoWrite",
+	"WebFetch",
+	"WebSearch",
+	"NotebookEdit",
+	"Skill",
+	"ExitPlanMode",
+	"ToolSearch",
+	"leverage_execute",
+];
+
+/** The tools a window that runs Leverage's turns registers, as registered. */
+export const LEVERAGE_TOOLS = [...MIRRORED, "remote_tool"].map((name) => ({
+	name,
+	description: `${name}, run by the Leverage session.`,
+	inputSchema: { type: "object" as const, additionalProperties: true },
+}));
+
+/** Whether the pane and /leverage can reach Leverage. */
+export function isReachable(): boolean {
 	return connection !== null;
+}
+
+/** Whether this window runs a Leverage session's turns. */
+export function isClient(): boolean {
+	return connection !== null && isClientWindow;
 }
 
 export function space(): string | null {

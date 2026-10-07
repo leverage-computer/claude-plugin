@@ -1,6 +1,6 @@
 import type { EngineInterface, On } from "claude-code";
 
-import { here, leverageRequest, space } from "./client";
+import { here, isReachable, leverageRequest, space } from "./client";
 import { PANE } from "./pane";
 
 // `/leverage <action>`: what the other Leverage apps do with a session,
@@ -332,6 +332,11 @@ async function run($: EngineInterface, args: string): Promise<string> {
 
 export function registerCommands(on: On) {
 	on("command.run", { command: "leverage" }, async ($, e) => {
+		if (!isReachable()) {
+			return {
+				text: "No Leverage here yet. Run leverage claude once in a terminal: it keeps the token this plugin reads.",
+			};
+		}
 		if (!e.args.trim()) {
 			await $.ui.open({ id: PANE, title: "Leverage" });
 			return { text: "Leverage pane opened. /leverage help lists the rest." };

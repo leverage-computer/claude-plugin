@@ -2,7 +2,7 @@ import type { EngineInterface, On } from "claude-code";
 import { atom, read } from "claude-code";
 
 import type { Room, Viewer } from "../types";
-import { here, isConnected, leverageRequest } from "./client";
+import { here, isClient, leverageRequest } from "./client";
 
 // Who else is in the Leverage session, and who types there, above the prompt.
 // The others see this person type, as in their own apps.
@@ -54,7 +54,7 @@ async function signal($: EngineInterface, active: boolean) {
 export function registerPeople(on: On) {
 	on("prompt.edit", async ($, e, next) => {
 		const box = await next(e);
-		if (!isConnected() || !here.id) return box;
+		if (!isClient() || !here.id) return box;
 		const now = await $.clock.now();
 		if (!box.text.trim()) {
 			if (here.typedAt) void signal($, false);
@@ -67,7 +67,7 @@ export function registerPeople(on: On) {
 	});
 
 	on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
-		if (!isConnected() || e.props.hasSurvey) return next(e);
+		if (!isClient() || e.props.hasSurvey) return next(e);
 		const { viewers, typing } = await read($, people);
 		if (viewers.length === 0 && typing.length === 0) return next(e);
 		const { Box, Text } = $.ui.resolve(e);

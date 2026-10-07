@@ -11,7 +11,15 @@ import type {
 	SessionPanel,
 	WorkspaceTree,
 } from "../types";
-import { connect, follow, here, leverageRequest } from "./client";
+import {
+	becomeClient,
+	follow,
+	here,
+	isClient,
+	isReachable,
+	LEVERAGE_TOOLS,
+	leverageRequest,
+} from "./client";
 
 // The Leverage pane, drawn as Claude's session sidebar: the workspace's
 // channels, their sessions, who else is in each, and their connections.
@@ -61,13 +69,7 @@ async function call<T>(
 }
 
 async function refresh($: EngineInterface) {
-	const connected = connect({
-		url: await $.env.get("LEVERAGE_CLAUDE_URL"),
-		token: await $.env.get("LEVERAGE_CLAUDE_TOKEN"),
-		space: await $.env.get("LEVERAGE_CLAUDE_SPACE"),
-		session: await $.env.get("LEVERAGE_CLAUDE_SESSION"),
-	});
-	if (!connected) return;
+	if (!isReachable()) return;
 	const asked = await read($, search);
 	const next = await call<Omit<WorkspaceTree, "attached">>(
 		$,
@@ -192,7 +194,14 @@ export function registerPane(on: On) {
 			$.clock.every(5000, () => refresh($));
 		}
 		const data = await read($, tree);
-		if (!data) return <Text dimColor>Connecting to Leverage…</Text>;
+		if (!data) {
+			return (
+				<Text dimColor wrap="wrap">
+					Connecting to Leverage… Run leverage claude once in a terminal if it
+					never does: the pane reads the token it keeps.
+				</Text>
+			);
+		}
 		const shown = await read($, panel);
 
 		const attach = async (session: PaneSession) => {
@@ -203,6 +212,11 @@ export function registerPane(on: On) {
 				`/sessions/${session.id}`,
 			);
 			follow(opened.id, opened.cursor);
+			// From here the window runs the session's turns in Leverage.
+			if (!isClient()) {
+				for (const tool of LEVERAGE_TOOLS) await $.tool.register(tool);
+				becomeClient();
+			}
 			// One window mirrors one session, so the old transcript goes.
 			await $.command.run({ command: "clear" });
 			$.ui.status(session.title);
