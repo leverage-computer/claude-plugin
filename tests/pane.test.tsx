@@ -11,14 +11,65 @@ const TREE: WorkspaceTree = {
 			id: "C1",
 			name: "onboarding",
 			sessions: [
-				{ id: "s-1", title: "login bug", status: "active" },
-				{ id: "s-2", title: "pricing copy", status: "idle" },
+				{
+					id: "s-1",
+					title: "login bug",
+					status: "awaiting_input",
+					viewers: [],
+					typing: [],
+				},
+				{
+					id: "s-2",
+					title: "pricing copy",
+					status: "idle",
+					viewers: [
+						{ name: "Grace Hopper", state: "active", apps: ["codex"] },
+						{ name: "Alan Turing", state: "idle", apps: [] },
+					],
+					typing: [],
+				},
 			],
 			connections: ["acme/web", "Linear"],
 		},
 		{ id: "C2", name: "billing", sessions: [], connections: [] },
 	],
-	direct: [{ id: "s-3", title: "scratch", status: "idle" }],
+	direct: [
+		{
+			id: "s-3",
+			title: "scratch",
+			status: "idle",
+			viewers: [{ name: "Ada Lovelace", state: "active", apps: [] }],
+			typing: ["Ada Lovelace"],
+		},
+	],
+};
+
+/** What Leverage answers about the session here, by the path's last part. */
+const PANEL: Record<string, unknown> = {
+	waiting: {
+		writable: true,
+		approvals: [{ id: "inv-1", tool: "Bash", input: { command: "npm test" } }],
+		question: null,
+	},
+	queue: [{ uuid: "q-1", text: "then fix the copy" }],
+	agents: [
+		{
+			task: "t-1",
+			description: "Find the flake",
+			type: "Explore",
+			running: true,
+			status: null,
+		},
+	],
+	outputs: ["notes/report.md"],
+	changes: [
+		{
+			name: "acme/web",
+			branch: "login-fix",
+			changes: [{ path: "src/login.ts" }],
+			pullRequest: { number: 12, url: "https://github.com/acme/web/pull/12" },
+		},
+	],
 };
 
 const PANE = {
@@ -41,6 +92,17 @@ function fakeLeverage(on: On) {
 	const histories: string[] = [];
 	const queries: (string | null)[] = [];
 	const commands: string[] = [];
+	const posted: [string, unknown][] = [];
+	const saved = new Map<string, string>();
+	const toasts: string[] = [];
+	on("fs.write", (_, e) => {
+		saved.set(e.path, e.text);
+		return { value: undefined };
+	});
+	on("ui.toast", (_, e) => {
+		toasts.push(e.text);
+		return { value: undefined };
+	});
 	mock.env(on, {
 		LEVERAGE_CLAUDE_URL: "https://leverage.test",
 		LEVERAGE_CLAUDE_TOKEN: "lev_cl_test",
@@ -52,14 +114,36 @@ function fakeLeverage(on: On) {
 		const path = url.pathname;
 		if (path === "/api/claude/workspace")
 			queries.push(url.searchParams.get("query"));
+		if (e.init?.method === "POST")
+			posted.push([
+				path.replace("/api/claude", ""),
+				JSON.parse(e.init.body ?? "{}"),
+			]);
 		const { attached: _, ...tree } = TREE;
 		let answer: unknown = tree;
 		const [, id, action] =
 			path.match(/^\/api\/claude\/sessions\/([^/]+)\/?(.*)$/) ?? [];
 		if (id && !action) {
 			opened.push(id);
-			answer = { id, title: id, cursor: 7 };
+			answer = {
+				id,
+				title: id,
+				cursor: 7,
+				model: "claude-opus-4-5",
+				effort: "high",
+			};
 		}
+		if (path === "/api/claude/models") {
+			answer = [
+				{ id: "claude-opus-4-5", label: "Opus", efforts: ["low", "high"] },
+				{ id: "claude-sonnet-4-5", label: "Sonnet", efforts: ["low", "high"] },
+			];
+		}
+		if (action && action in PANEL) answer = PANEL[action];
+		if (action === "file") answer = { content: "# Report" };
+		if (path.startsWith("/api/claude/approvals/") || action === "model")
+			answer = { ok: true };
+		if (action?.startsWith("queue/")) answer = { ok: true };
 		if (action === "read") {
 			read.push(id ?? "");
 			answer = { ok: true };
@@ -112,21 +196,65 @@ function fakeLeverage(on: On) {
 		commands.push(e.command);
 		return { text: "" };
 	});
-	return { opened, read, histories, queries, commands, clock };
+	return {
+		opened,
+		read,
+		histories,
+		queries,
+		commands,
+		clock,
+		posted,
+		saved,
+		toasts,
+	};
 }
 
 for (const surface of ["terminal", "desktop", "vscode"] as const) {
-	test(`the pane lists channels, sessions and connections on ${surface}`, async ($, on) => {
+	test(`the pane lists channels, sessions, who is in them and connections on ${surface}`, async ($, on) => {
 		fakeLeverage(on);
 		const ui = await $.ui.mount({ ...PANE, surface });
 		await expect(ui.find({ text: /#onboarding/ })).resolves.toBeDefined();
-		expect((await ui.find({ key: "s-s-1" }))?.text).toContain("← here");
-		expect((await ui.find({ key: "s-s-2" }))?.text).not.toContain("← here");
+		await expect(ui.find({ key: "s-s-2" })).resolves.toBeDefined();
+		await expect(ui.find({ key: "s-s-3" })).resolves.toBeDefined();
 		await expect(
 			ui.find({ text: /acme\/web · Linear/ }),
 		).resolves.toBeDefined();
 		await expect(ui.find({ text: /no connections/ })).resolves.toBeDefined();
-		await expect(ui.find({ key: "s-s-3" })).resolves.toBeDefined();
+		// Who else has each session open, and who types there.
+		await expect(ui.find({ text: /Grace \+1/ })).resolves.toBeDefined();
+		await expect(ui.find({ text: /Ada types…/ })).resolves.toBeDefined();
+	});
+
+	test(`under the session here, the pane shows and drives it on ${surface}`, async ($, on) => {
+		const leverage = fakeLeverage(on);
+		const ui = await $.ui.mount({ ...PANE, surface });
+		await expect(ui.find({ text: /Bash: npm test/ })).resolves.toBeDefined();
+		await expect(ui.find({ text: /then fix the copy/ })).resolves.toBeDefined();
+		await expect(ui.find({ text: /Find the flake/ })).resolves.toBeDefined();
+		await expect(ui.find({ text: /login-fix/ })).resolves.toBeDefined();
+		// Only the session here has a panel.
+		expect(await ui.findAll({ key: "compact" })).toHaveLength(1);
+
+		await ui.press({ key: "allow-inv-1" });
+		await ui.select({ key: "model", value: "claude-sonnet-4-5" });
+		await ui.select({ key: "effort", value: "low" });
+		await ui.press({ key: "send-q-1" });
+		await ui.press({ key: "stop" });
+		expect(leverage.posted).toEqual([
+			["/approvals/inv-1", { decision: "once" }],
+			// The effort carries over when the new model has it.
+			["/sessions/s-1/model", { model: "claude-sonnet-4-5", effort: "high" }],
+			["/sessions/s-1/model", { model: "claude-opus-4-5", effort: "low" }],
+			["/sessions/s-1/queue/q-1/send", {}],
+			["/sessions/s-1/stop", {}],
+		]);
+
+		// An output is kept in the working folder, as /leverage save keeps it.
+		await ui.press({ key: "output-notes/report.md" });
+		expect(
+			[...leverage.saved].find(([path]) => path.endsWith("report.md"))?.[1],
+		).toBe("# Report");
+		expect(leverage.toasts).toContain("Saved report.md.");
 	});
 }
 
@@ -134,7 +262,7 @@ test("pressing another session moves the window to it", async ($, on) => {
 	const leverage = fakeLeverage(on);
 	const ui = await $.ui.mount({ ...PANE, surface: "desktop" });
 	await ui.press({ key: "s-s-2" });
-	expect(leverage.opened).toEqual(["s-2"]);
+	expect(leverage.opened).toContain("s-2");
 	expect(leverage.commands).toContain("clear");
 	// Opened here, it reads as read, and its last turns show.
 	expect(leverage.read).toEqual(["s-2"]);
@@ -152,7 +280,7 @@ test("pressing the session already here does nothing", async ($, on) => {
 	const leverage = fakeLeverage(on);
 	const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
 	await ui.press({ key: "s-s-1" });
-	expect(leverage.opened).toEqual([]);
+	expect(leverage.read).toEqual([]);
 	expect(leverage.commands).toEqual([]);
 });
 

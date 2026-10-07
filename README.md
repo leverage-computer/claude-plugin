@@ -41,8 +41,12 @@ space, it is private until you share it.
 - **Approvals and questions** show in Claude Code's own dialogs.
 - **Subagents** run as Claude Code's own agents: their steps show under the
   Agent call and in Claude Code's agents view.
-- **The Leverage pane** lists your spaces, their sessions and connections.
-  Press a session to open it in this window. `/leverage` opens the pane again.
+- **The Leverage pane** lists your spaces, their sessions and connections,
+  with who else has each session open and who types there. Press a session to
+  open it in this window. Under the session open here, the pane shows its model
+  and effort, the calls that wait on you, the queue, its subagents, the files
+  its last turn wrote and its changes, and lets you act on each.
+  `/leverage` opens the pane again.
 - **`/leverage help`** lists the actions: approvals, rename, archive and
   restore, model and effort, the queue, outputs, files, a shell command, changes
   and pull requests, skills, connectors and history. `/compact` and
