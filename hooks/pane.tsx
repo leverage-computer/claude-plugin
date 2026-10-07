@@ -19,6 +19,7 @@ import {
 	isReachable,
 	LEVERAGE_TOOLS,
 	leverageRequest,
+	origin,
 } from "./client";
 
 // The Leverage pane, drawn as Claude's session sidebar: the workspace's
@@ -177,14 +178,50 @@ function summary(approval: Approval) {
 
 const firstName = (name: string) => name.split(" ")[0] ?? name;
 
+/** Text that markdown draws as written. */
+const plain = (text: string) =>
+	text.replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, "\\$&");
+
+const FACES = [
+	"#d97757",
+	"#6a9bcc",
+	"#788c5d",
+	"#9b87c4",
+	"#c6613f",
+	"#5f9ea0",
+];
+
+/** A teammate's face: their initials on a color their name picks. */
+function face(name: string, idle: boolean): string {
+	const initials = name
+		.split(/\s+/)
+		.map((part) => part[0] ?? "")
+		.join("")
+		.slice(0, 2)
+		.toUpperCase()
+		.replace(/[<>&"']/g, "");
+	let hash = 0;
+	for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+	const color = FACES[hash % FACES.length];
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="9" fill="${color}" opacity="${idle ? 0.45 : 1}"/><text x="9" y="12.2" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="7.5" font-weight="600" fill="#fff">${initials}</text></svg>`;
+}
+
+/** Something the person can press: a label and what it runs. */
+type Press = { key: string; label: string; run: () => unknown };
+
 export function registerPane(on: On) {
 	on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {
 		const elements = $.ui.resolve(e);
-		const { Box, Text, Button, Link } = elements;
+		const { Box, Text, Button, Markdown } = elements;
 		// A phone has no text field or picker: it lists every session, and the
-		// model shows as text.
+		// model shows as text. Only a desktop draws pictures.
 		const Input = "Input" in elements ? elements.Input : null;
 		const Select = "Select" in elements ? elements.Select : null;
+		const Svg =
+			e.surface !== "terminal" && "Svg" in elements ? elements.Svg : null;
+		// A desktop draws every Button as a native button, so beyond the
+		// terminal a press is a link in Claude's own text.
+		const asLinks = e.surface !== "terminal";
 		const asked = await read($, search);
 		const open = await read($, more);
 		// The first drawing starts the refresh. A timer outlives this dispatch.
@@ -203,6 +240,47 @@ export function registerPane(on: On) {
 			);
 		}
 		const shown = await read($, panel);
+		const web = `${origin()}/w/${encodeURIComponent(data.workspace)}`;
+		/** A session's page in Leverage: where its links point. */
+		const page = (id: string) => `${web}/session/${encodeURIComponent(id)}`;
+
+		/** Presses in a row: links in Claude's text, or plain terminal buttons. */
+		const presses = (
+			key: string,
+			base: string,
+			items: Press[],
+			isDim = true,
+		) => {
+			if (!asLinks) {
+				return (
+					<Box key={key} flexDirection="row" gap={2} flexWrap="wrap">
+						{items.map((item) => (
+							<Button
+								key={item.key}
+								plain
+								dimColor={isDim}
+								label={item.label}
+								onPress={() => void item.run()}
+							/>
+						))}
+					</Box>
+				);
+			}
+			const href = (item: Press) => `${base}#${encodeURIComponent(item.key)}`;
+			return (
+				<Markdown
+					key={key}
+					dimColor={isDim}
+					text={items
+						.map((item) => `[${plain(item.label)}](${href(item)})`)
+						.join(" · ")}
+					pressableLinks={items.map(href)}
+					onLinkPress={(link) =>
+						void items.find((item) => href(item) === link.href)?.run()
+					}
+				/>
+			);
+		};
 
 		const attach = async (session: PaneSession) => {
 			if (session.id === data.attached) return;
@@ -241,8 +319,50 @@ export function registerPane(on: On) {
 			await refresh($);
 		};
 
+		/** Who else has the session open: their faces, or who types. */
+		const people = (session: PaneSession) => {
+			const viewers = session.viewers ?? [];
+			const typing = session.typing ?? [];
+			if (typing.length > 0) {
+				return (
+					<Text dimColor italic wrap="truncate">
+						{firstName(typing[0] ?? "")} types…
+					</Text>
+				);
+			}
+			if (viewers.length === 0) return null;
+			if (Svg) {
+				return (
+					<Box flexDirection="row" gap={0}>
+						{viewers.slice(0, 3).map((viewer) => (
+							<Svg
+								source={face(viewer.name, viewer.state === "idle")}
+								alt={`${viewer.name} has it open`}
+								width={18}
+								height={18}
+							/>
+						))}
+						{viewers.length > 3 ? (
+							<Text dimColor> +{viewers.length - 3}</Text>
+						) : null}
+					</Box>
+				);
+			}
+			const [first, ...others] = viewers;
+			return (
+				<Text wrap="truncate">
+					<Text color={first?.state === "idle" ? "warning" : "success"}>●</Text>
+					<Text dimColor>
+						{" "}
+						{firstName(first?.name ?? "")}
+						{others.length ? ` +${others.length}` : ""}
+					</Text>
+				</Text>
+			);
+		};
+
 		const section = (key: string, title: string, children: RenderChildren) => (
-			<Box key={key} flexDirection="column" marginTop={1}>
+			<Box key={`${key}-section`} flexDirection="column" marginTop={1}>
 				<Text dimColor>{title}</Text>
 				{children}
 			</Box>
@@ -250,14 +370,26 @@ export function registerPane(on: On) {
 
 		const sessionPanel = (session: PaneSession) => {
 			if (!shown || shown.session !== session.id)
-				return <Text dimColor> Reading the session…</Text>;
+				return (
+					<Box paddingLeft={3}>
+						<Text dimColor>Reading the session…</Text>
+					</Box>
+				);
 			const at = `/sessions/${session.id}`;
+			const base = page(session.id);
 			const model = shown.models.find((one) => one.id === shown.model);
 			const decide = (approval: Approval, decision: string) => {
 				// Decided here, Claude Code's dialog does not ask it again.
 				here.known.add(approval.id);
 				return act($, `/approvals/${approval.id}`, { decision });
 			};
+			const changes = shown.changes.map((repository) => {
+				const files = repository.changes.length;
+				const pull = repository.pullRequest
+					? ` · [#${repository.pullRequest.number}](${repository.pullRequest.url})`
+					: "";
+				return `**${plain(repository.name)}**${repository.branch ? ` on \`${repository.branch}\`` : ""} · ${files} ${files === 1 ? "file" : "files"}${pull}`;
+			});
 			return (
 				<Box flexDirection="column" paddingLeft={3} paddingRight={1}>
 					{section(
@@ -311,24 +443,28 @@ export function registerPane(on: On) {
 										<Box key={`approval-${approval.id}`} flexDirection="column">
 											<Text wrap="truncate">{summary(approval)}</Text>
 											{shown.writable ? (
-												<Box flexDirection="row" gap={1}>
-													<Button
-														key={`allow-${approval.id}`}
-														label="Allow"
-														variant="primary"
-														onPress={() => decide(approval, "once")}
-													/>
-													<Button
-														key={`allow-session-${approval.id}`}
-														label="Allow for the session"
-														onPress={() => decide(approval, "session")}
-													/>
-													<Button
-														key={`reject-${approval.id}`}
-														label="Reject"
-														onPress={() => decide(approval, "reject")}
-													/>
-												</Box>
+												presses(
+													`decide-${approval.id}`,
+													base,
+													[
+														{
+															key: `allow-${approval.id}`,
+															label: "Allow",
+															run: () => decide(approval, "once"),
+														},
+														{
+															key: `allow-session-${approval.id}`,
+															label: "Allow for this session",
+															run: () => decide(approval, "session"),
+														},
+														{
+															key: `reject-${approval.id}`,
+															label: "Reject",
+															run: () => decide(approval, "reject"),
+														},
+													],
+													false,
+												)
 											) : (
 												<Text dimColor>The session's owner answers this.</Text>
 											)}
@@ -345,29 +481,20 @@ export function registerPane(on: On) {
 								"queue",
 								"Queue",
 								shown.queue.map((queued) => (
-									<Box
-										key={`queued-${queued.uuid}`}
-										flexDirection="row"
-										gap={1}
-									>
-										<Box flexGrow={1}>
-											<Text wrap="truncate">{queued.text}</Text>
-										</Box>
-										<Button
-											key={`send-${queued.uuid}`}
-											label="Send now"
-											plain
-											onPress={() => act($, `${at}/queue/${queued.uuid}/send`)}
-										/>
-										<Button
-											key={`take-${queued.uuid}`}
-											label="Take back"
-											plain
-											dimColor
-											onPress={() =>
-												act($, `${at}/queue/${queued.uuid}/cancel`)
-											}
-										/>
+									<Box key={`queued-${queued.uuid}`} flexDirection="column">
+										<Text wrap="truncate">{queued.text}</Text>
+										{presses(`queue-${queued.uuid}`, base, [
+											{
+												key: `send-${queued.uuid}`,
+												label: "Send now",
+												run: () => act($, `${at}/queue/${queued.uuid}/send`),
+											},
+											{
+												key: `take-${queued.uuid}`,
+												label: "Take back",
+												run: () => act($, `${at}/queue/${queued.uuid}/cancel`),
+											},
+										])}
 									</Box>
 								)),
 							)
@@ -394,64 +521,47 @@ export function registerPane(on: On) {
 						? section(
 								"outputs",
 								"Outputs",
-								shown.outputs.map((path) => (
-									<Button
-										key={`output-${path}`}
-										label={path}
-										plain
-										dimColor
-										onPress={() => save($, path)}
-									/>
-								)),
+								presses(
+									"outputs-list",
+									base,
+									shown.outputs.map((path) => ({
+										key: `output-${path}`,
+										label: path,
+										run: () => save($, path),
+									})),
+									false,
+								),
 							)
 						: null}
-					{shown.changes.length > 0
+					{changes.length > 0
 						? section(
 								"changes",
 								"Changes",
-								shown.changes.map((repository) => (
-									<Text key={`repo-${repository.name}`} wrap="truncate">
-										{repository.name}
-										<Text dimColor>
-											{repository.branch ? ` on ${repository.branch}` : ""} ·{" "}
-											{repository.changes.length} files
-										</Text>
-										{repository.pullRequest ? (
-											<Text>
-												{" · "}
-												<Link
-													href={repository.pullRequest.url}
-													label={`#${repository.pullRequest.number}`}
-												/>
-											</Text>
-										) : null}
-									</Text>
-								)),
+								<Markdown key="changes-list" text={changes.join("  \n")} />,
 							)
 						: null}
-					<Box flexDirection="row" gap={1} marginTop={1}>
-						{!AT_REST.has(session.status) ? (
-							<Button
-								key="stop"
-								label="Stop"
-								plain
-								onPress={() => act($, `${at}/stop`)}
-							/>
-						) : null}
-						<Button
-							key="compact"
-							label="Compact"
-							plain
-							dimColor
-							onPress={() => act($, `${at}/compact`)}
-						/>
-						<Button
-							key="archive"
-							label="Archive"
-							plain
-							dimColor
-							onPress={() => act($, `${at}/archive`)}
-						/>
+					<Box marginTop={1}>
+						{presses("actions", base, [
+							...(!AT_REST.has(session.status)
+								? [
+										{
+											key: "stop",
+											label: "Stop",
+											run: () => act($, `${at}/stop`),
+										},
+									]
+								: []),
+							{
+								key: "compact",
+								label: "Compact",
+								run: () => act($, `${at}/compact`),
+							},
+							{
+								key: "archive",
+								label: "Archive",
+								run: () => act($, `${at}/archive`),
+							},
+						])}
 					</Box>
 				</Box>
 			);
@@ -459,13 +569,33 @@ export function registerPane(on: On) {
 
 		const row = (session: PaneSession) => {
 			const isHere = session.id === data.attached;
-			const [first, ...others] = session.viewers ?? [];
-			const typing = session.typing ?? [];
+			const link = page(session.id);
+			const title = isHere ? (
+				<Text bold wrap="truncate">
+					{session.title}
+				</Text>
+			) : asLinks ? (
+				<Markdown
+					key={`s-${session.id}`}
+					text={`[${plain(session.title)}](${link})`}
+					pressableLinks={[link]}
+					onLinkPress={() => void attach(session)}
+				/>
+			) : (
+				<Button
+					key={`s-${session.id}`}
+					plain
+					dimColor
+					label={session.title}
+					onPress={() => attach(session)}
+				/>
+			);
 			return (
 				<Box key={`session-${session.id}`} flexDirection="column">
 					<Box
 						key={`row-${session.id}`}
 						flexDirection="row"
+						alignItems="center"
 						gap={1}
 						paddingX={1}
 						{...(isHere ? { backgroundColor: "userMessageBackground" } : {})}
@@ -474,31 +604,10 @@ export function registerPane(on: On) {
 						<Text color={MARK[session.status] ?? "inactive"}>
 							{MARK[session.status] ? "●" : " "}
 						</Text>
-						<Box flexGrow={1}>
-							<Button
-								key={`s-${session.id}`}
-								plain
-								dimColor={!isHere}
-								label={session.title}
-								onPress={() => attach(session)}
-							/>
+						<Box flexGrow={1} flexShrink={1}>
+							{title}
 						</Box>
-						{typing.length > 0 ? (
-							<Text dimColor italic wrap="truncate">
-								{firstName(typing[0] ?? "")} types…
-							</Text>
-						) : first ? (
-							<Text wrap="truncate">
-								<Text color={first.state === "idle" ? "warning" : "success"}>
-									●
-								</Text>
-								<Text dimColor>
-									{" "}
-									{firstName(first.name)}
-									{others.length ? ` +${others.length}` : ""}
-								</Text>
-							</Text>
-						) : null}
+						{people(session)}
 					</Box>
 					{isHere ? sessionPanel(session) : null}
 				</Box>
@@ -511,16 +620,15 @@ export function registerPane(on: On) {
 				...listed.map(row),
 				...(list.length > listed.length
 					? [
-							<Box key={`more-row-${owner}`} paddingX={1}>
-								<Button
-									key={`more-${owner}`}
-									plain
-									dimColor
-									label={`  ${list.length - listed.length} more`}
-									onPress={() =>
-										update($, more, (ids) => [...(ids ?? []), owner])
-									}
-								/>
+							<Box key={`more-row-${owner}`} paddingX={1} paddingLeft={3}>
+								{presses(`more-${owner}`, web, [
+									{
+										key: `more-${owner}`,
+										label: `${list.length - listed.length} more`,
+										run: () =>
+											update($, more, (ids) => [...(ids ?? []), owner]),
+									},
+								])}
 							</Box>,
 						]
 					: []),
@@ -540,8 +648,8 @@ export function registerPane(on: On) {
 
 		return (
 			<Box flexDirection="column" paddingX={1}>
-				<Box paddingX={1}>
-					<Text dimColor>{data.workspace}</Text>
+				<Box paddingX={1} marginBottom={1}>
+					<Text bold>{data.workspace}</Text>
 				</Box>
 				{searchBox}
 				{data.channels.map((channel) => (
@@ -549,25 +657,25 @@ export function registerPane(on: On) {
 						<Box paddingX={1}>
 							<Text dimColor>#{channel.name}</Text>
 						</Box>
-						{channel.sessions.length === 0 && (
-							<Box paddingX={1}>
-								<Text dimColor> no sessions</Text>
-							</Box>
-						)}
 						{sessions(channel.id, channel.sessions)}
-						<Box paddingX={1}>
-							<Text dimColor wrap="truncate">
-								{channel.connections.length === 0
-									? "  no connections"
-									: `  ↳ ${channel.connections.join(" · ")}`}
-							</Text>
-						</Box>
+						{channel.sessions.length === 0 ? (
+							<Box paddingX={1} paddingLeft={3}>
+								<Text dimColor>No sessions yet</Text>
+							</Box>
+						) : null}
+						{channel.connections.length > 0 ? (
+							<Box paddingX={1} paddingLeft={3}>
+								<Text dimColor wrap="truncate">
+									{channel.connections.join(" · ")}
+								</Text>
+							</Box>
+						) : null}
 					</Box>
 				))}
 				{data.direct.length > 0 && (
 					<Box flexDirection="column" marginTop={1}>
 						<Box paddingX={1}>
-							<Text dimColor>Direct sessions</Text>
+							<Text dimColor>Private</Text>
 						</Box>
 						{sessions("direct", data.direct)}
 					</Box>
