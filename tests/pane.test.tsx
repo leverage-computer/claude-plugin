@@ -271,7 +271,7 @@ for (const surface of ["terminal", "desktop", "vscode"] as const) {
 		const leverage = fakeLeverage(on);
 		await startWindow($, on, surface);
 		const ui = await $.ui.mount({ ...PANE, surface });
-		await expect(ui.find({ text: /Bash: npm test/ })).resolves.toBeDefined();
+		await expect(ui.find({ text: /npm test/ })).resolves.toBeDefined();
 		await expect(ui.find({ text: /then fix the copy/ })).resolves.toBeDefined();
 		await expect(ui.find({ text: /Find the flake/ })).resolves.toBeDefined();
 		await expect(ui.find({ text: /login-fix/ })).resolves.toBeDefined();

@@ -163,7 +163,7 @@ async function save($: EngineInterface, path: string) {
 	}
 }
 
-/** One line of what a waiting call would do: its command, else its input. */
+/** What a waiting call would do: its command, else its input. */
 function summary(approval: Approval) {
 	const input = (approval.input ?? {}) as Record<string, unknown>;
 	const shown =
@@ -172,14 +172,10 @@ function summary(approval: Approval) {
 			: typeof input.file_path === "string"
 				? input.file_path
 				: JSON.stringify(input);
-	return `${approval.tool}: ${shown}`;
+	return shown;
 }
 
 const firstName = (name: string) => name.split(" ")[0] ?? name;
-
-/** Text that markdown draws as written. */
-const plain = (text: string) =>
-	text.replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, "\\$&");
 
 const FACES = [
 	"#d97757",
@@ -205,19 +201,30 @@ function face(name: string, idle: boolean): string {
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="9" fill="${color}" opacity="${idle ? 0.45 : 1}"/><text x="9" y="12.2" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="7.5" font-weight="600" fill="#fff">${initials}</text></svg>`;
 }
 
-/** Something the person can press: a label and what it runs. */
-type Press = { key: string; label: string; run: () => unknown };
+/** How a press draws: the main one filled, a second one outlined, the rest as text. */
+type Look = "primary" | "secondary" | "text";
+/** Something the person can press: a label, how it draws and what it runs. */
+type Press = { key: string; label: string; look?: Look; run: () => unknown };
+
+/** A row's fill when it is the session here, or under the pointer. */
+const LIT: Record<string, string> = {
+	terminal: "userMessageBackground",
+	other: "promptBorderShimmer",
+};
+/** No color: a row's border that only rounds its fill. */
+const CLEAR = "#00000000";
 
 export function registerPane(on: On) {
 	on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {
 		const elements = $.ui.resolve(e);
-		const { Box, Text, Button, Markdown } = elements;
+		const { Box, Text, Button, Link } = elements;
+		const isTerminal = e.surface === "terminal";
 		// A phone has no text field or picker: it lists every session, and the
-		// model shows as text. Only a desktop draws pictures.
+		// model shows as text. Only a surface beyond the terminal draws pictures.
 		const Input = "Input" in elements ? elements.Input : null;
 		const Select = "Select" in elements ? elements.Select : null;
-		const Svg =
-			e.surface !== "terminal" && "Svg" in elements ? elements.Svg : null;
+		const Svg = !isTerminal && "Svg" in elements ? elements.Svg : null;
+		const lit = isTerminal ? LIT.terminal : LIT.other;
 		const asked = await read($, search);
 		const open = await read($, more);
 		// The first drawing starts the refresh. A timer outlives this dispatch.
@@ -237,18 +244,20 @@ export function registerPane(on: On) {
 		}
 		const shown = await read($, panel);
 
-		/** Presses in a row: plain buttons, drawn as text on every surface. */
-		const presses = (key: string, items: Press[], isDim = true) => (
-			<Box key={key} flexDirection="row" gap={2} flexWrap="wrap">
-				{items.map((item) => (
-					<Button
-						key={item.key}
-						plain
-						dimColor={isDim}
-						label={item.label}
-						onPress={() => void item.run()}
-					/>
-				))}
+		const press = (item: Press) => (
+			<Button
+				key={item.key}
+				label={item.label}
+				{...(item.look === "primary" ? { variant: "primary" as const } : {})}
+				{...(item.look === "text" || item.look === undefined
+					? { plain: true as const, dimColor: true }
+					: {})}
+				onPress={() => void item.run()}
+			/>
+		);
+		const presses = (key: string, items: Press[]) => (
+			<Box key={key} flexDirection="row" gap={1} flexWrap="wrap">
+				{items.map(press)}
 			</Box>
 		);
 
@@ -303,7 +312,7 @@ export function registerPane(on: On) {
 			if (viewers.length === 0) return null;
 			if (Svg) {
 				return (
-					<Box flexDirection="row" gap={0}>
+					<Box flexDirection="row" flexShrink={0} gap={0}>
 						{viewers.slice(0, 3).map((viewer) => (
 							<Svg
 								source={face(viewer.name, viewer.state === "idle")}
@@ -331,20 +340,47 @@ export function registerPane(on: On) {
 			);
 		};
 
-		const section = (key: string, title: string, children: RenderChildren) => (
-			<Box key={`${key}-section`} flexDirection="column" marginTop={1}>
+		/** A one-column mark in a theme color, or the room for one. */
+		const mark = (key: string, color: string | undefined, glyph = "●") => (
+			<Box key={key} width={1} flexShrink={0}>
+				{color ? <Text color={color}>{glyph}</Text> : null}
+			</Box>
+		);
+
+		/** A titled part of the session's card. */
+		const part = (key: string, title: string, children: RenderChildren) => (
+			<Box key={`${key}-part`} flexDirection="column">
 				<Text dimColor>{title}</Text>
 				{children}
 			</Box>
 		);
 
-		const sessionPanel = (session: PaneSession) => {
+		/** One line with text that shortens to fit, and presses at its end. */
+		const line = (key: string, text: string, items: Press[] = []) => (
+			<Box key={key} flexDirection="row" alignItems="center" gap={1}>
+				<Box flexGrow={1} flexShrink={1} minWidth={0}>
+					<Text wrap="truncate">{text}</Text>
+				</Box>
+				{items.map(press)}
+			</Box>
+		);
+
+		const sessionCard = (session: PaneSession) => {
+			const card = (children: RenderChildren) => (
+				<Box
+					key={`card-${session.id}`}
+					flexDirection="column"
+					gap={1}
+					marginX={1}
+					marginTop={1}
+					marginBottom={1}
+					borderStyle="round"
+				>
+					{children}
+				</Box>
+			);
 			if (!shown || shown.session !== session.id)
-				return (
-					<Box paddingLeft={3}>
-						<Text dimColor>Reading the session…</Text>
-					</Box>
-				);
+				return card(<Text dimColor>Reading the session…</Text>);
 			const at = `/sessions/${session.id}`;
 			const model = shown.models.find((one) => one.id === shown.model);
 			const decide = (approval: Approval, decision: string) => {
@@ -352,202 +388,216 @@ export function registerPane(on: On) {
 				here.known.add(approval.id);
 				return act($, `/approvals/${approval.id}`, { decision });
 			};
-			const changes = shown.changes.map((repository) => {
-				const files = repository.changes.length;
-				const pull = repository.pullRequest
-					? ` · [#${repository.pullRequest.number}](${repository.pullRequest.url})`
-					: "";
-				return `**${plain(repository.name)}**${repository.branch ? ` on \`${repository.branch}\`` : ""} · ${files} ${files === 1 ? "file" : "files"}${pull}`;
-			});
-			return (
-				<Box flexDirection="column" paddingLeft={3} paddingRight={1}>
-					{section(
-						"model",
-						"Model",
-						Select && shown.models.length > 0 ? (
-							<Box flexDirection="row" gap={1} flexWrap="wrap">
-								<Select
-									key="model"
-									options={shown.models.map((one) => ({
-										value: one.id,
-										label: one.label,
-									}))}
-									{...(shown.model ? { value: shown.model } : {})}
-									onSelect={(value: string) =>
-										act($, `${at}/model`, {
-											model: value,
-											// The effort carries over when the new model has it.
-											effort: shown.models
-												.find((one) => one.id === value)
-												?.efforts.includes(shown.effort ?? "")
-												? shown.effort
-												: null,
-										})
-									}
-								/>
-								{model && model.efforts.length > 0 ? (
-									<Select
-										key="effort"
-										options={model.efforts.map((effort) => ({ value: effort }))}
-										{...(shown.effort ? { value: shown.effort } : {})}
-										onSelect={(value: string) =>
-											act($, `${at}/model`, { model: model.id, effort: value })
-										}
-									/>
-								) : null}
-							</Box>
-						) : (
-							<Text>
-								{model?.label ?? shown.model ?? "The space's default"}
-								{shown.effort ? ` · ${shown.effort}` : ""}
-							</Text>
-						),
-					)}
-					{shown.approvals.length > 0 || shown.question
-						? section(
-								"waiting",
-								"Waiting on you",
-								<Box flexDirection="column">
-									{shown.approvals.map((approval) => (
-										<Box key={`approval-${approval.id}`} flexDirection="column">
-											<Text wrap="truncate">{summary(approval)}</Text>
-											{shown.writable ? (
-												presses(
-													`decide-${approval.id}`,
-													[
-														{
-															key: `allow-${approval.id}`,
-															label: "Allow",
-															run: () => decide(approval, "once"),
-														},
-														{
-															key: `allow-session-${approval.id}`,
-															label: "Allow for this session",
-															run: () => decide(approval, "session"),
-														},
-														{
-															key: `reject-${approval.id}`,
-															label: "Reject",
-															run: () => decide(approval, "reject"),
-														},
-													],
-													false,
-												)
-											) : (
-												<Text dimColor>The session's owner answers this.</Text>
-											)}
-										</Box>
-									))}
-									{shown.question ? (
-										<Text dimColor>A question waits in the session.</Text>
-									) : null}
-								</Box>,
-							)
-						: null}
-					{shown.queue.length > 0
-						? section(
-								"queue",
-								"Queue",
-								shown.queue.map((queued) => (
-									<Box key={`queued-${queued.uuid}`} flexDirection="column">
-										<Text wrap="truncate">{queued.text}</Text>
-										{presses(`queue-${queued.uuid}`, [
-											{
-												key: `send-${queued.uuid}`,
-												label: "Send now",
-												run: () => act($, `${at}/queue/${queued.uuid}/send`),
-											},
-											{
-												key: `take-${queued.uuid}`,
-												label: "Take back",
-												run: () => act($, `${at}/queue/${queued.uuid}/cancel`),
-											},
-										])}
-									</Box>
-								)),
-							)
-						: null}
-					{shown.agents.length > 0
-						? section(
-								"agents",
-								"Subagents",
-								shown.agents.map((agent) => (
-									<Text key={`agent-${agent.task}`} wrap="truncate">
-										<Text color={agent.running ? "claude" : "inactive"}>
-											{agent.running ? "●" : "○"}
-										</Text>{" "}
-										{agent.description || "Subagent"}
-										<Text dimColor>
-											{agent.type ? ` · ${agent.type}` : ""}
-											{agent.status ? ` · ${agent.status}` : ""}
-										</Text>
-									</Text>
-								)),
-							)
-						: null}
-					{shown.outputs.length > 0
-						? section(
-								"outputs",
-								"Outputs",
-								presses(
-									"outputs-list",
-									shown.outputs.map((path) => ({
-										key: `output-${path}`,
-										label: path,
-										run: () => save($, path),
-									})),
-									false,
-								),
-							)
-						: null}
-					{changes.length > 0
-						? section(
-								"changes",
-								"Changes",
-								<Markdown key="changes-list" text={changes.join("  \n")} />,
-							)
-						: null}
-					<Box marginTop={1}>
-						{presses("actions", [
-							...(!AT_REST.has(session.status)
-								? [
-										{
-											key: "stop",
-											label: "Stop",
-											run: () => act($, `${at}/stop`),
-										},
-									]
-								: []),
-							{
-								key: "compact",
-								label: "Compact",
-								run: () => act($, `${at}/compact`),
-							},
-							{
-								key: "archive",
-								label: "Archive",
-								run: () => act($, `${at}/archive`),
-							},
-						])}
+			return card([
+				Select && shown.models.length > 0 ? (
+					<Box key="model-row" flexDirection="row" gap={1} flexWrap="wrap">
+						<Select
+							key="model"
+							label="Model"
+							options={shown.models.map((one) => ({
+								value: one.id,
+								label: one.label,
+							}))}
+							{...(shown.model ? { value: shown.model } : {})}
+							onSelect={(value: string) =>
+								act($, `${at}/model`, {
+									model: value,
+									// The effort carries over when the new model has it.
+									effort: shown.models
+										.find((one) => one.id === value)
+										?.efforts.includes(shown.effort ?? "")
+										? shown.effort
+										: null,
+								})
+							}
+						/>
+						{model && model.efforts.length > 0 ? (
+							<Select
+								key="effort"
+								options={model.efforts.map((effort) => ({ value: effort }))}
+								{...(shown.effort ? { value: shown.effort } : {})}
+								onSelect={(value: string) =>
+									act($, `${at}/model`, { model: model.id, effort: value })
+								}
+							/>
+						) : null}
 					</Box>
-				</Box>
-			);
+				) : (
+					<Box key="model-row" flexDirection="row" gap={1}>
+						<Text dimColor>Model</Text>
+						<Text wrap="truncate">
+							{model?.label ?? shown.model ?? "the space's default"}
+							{shown.effort ? ` · ${shown.effort}` : ""}
+						</Text>
+					</Box>
+				),
+				shown.approvals.length > 0 || shown.question
+					? part(
+							"waiting",
+							"Waiting on you",
+							<Box flexDirection="column" gap={1}>
+								{shown.approvals.map((approval) => (
+									<Box key={`approval-${approval.id}`} flexDirection="column">
+										<Text wrap="truncate">
+											<Text bold>{approval.tool}</Text> {summary(approval)}
+										</Text>
+										{shown.writable ? (
+											presses(`decide-${approval.id}`, [
+												{
+													key: `allow-${approval.id}`,
+													label: "Allow",
+													look: "primary",
+													run: () => decide(approval, "once"),
+												},
+												{
+													key: `allow-session-${approval.id}`,
+													label: "Allow for this session",
+													look: "secondary",
+													run: () => decide(approval, "session"),
+												},
+												{
+													key: `reject-${approval.id}`,
+													label: "Reject",
+													run: () => decide(approval, "reject"),
+												},
+											])
+										) : (
+											<Text dimColor>The session's owner answers this.</Text>
+										)}
+									</Box>
+								))}
+								{shown.question ? (
+									<Text dimColor>A question waits in the session.</Text>
+								) : null}
+							</Box>,
+						)
+					: null,
+				shown.queue.length > 0
+					? part(
+							"queue",
+							"Queued",
+							shown.queue.map((queued) =>
+								line(`queued-${queued.uuid}`, queued.text, [
+									{
+										key: `send-${queued.uuid}`,
+										label: "Send now",
+										run: () => act($, `${at}/queue/${queued.uuid}/send`),
+									},
+									{
+										key: `take-${queued.uuid}`,
+										label: "Take back",
+										run: () => act($, `${at}/queue/${queued.uuid}/cancel`),
+									},
+								]),
+							),
+						)
+					: null,
+				shown.agents.length > 0
+					? part(
+							"agents",
+							"Subagents",
+							shown.agents.map((agent) => (
+								<Box key={`agent-${agent.task}`} flexDirection="row" gap={1}>
+									{mark(
+										`agent-mark-${agent.task}`,
+										agent.running ? "claude" : "inactive",
+										agent.running ? "●" : "○",
+									)}
+									<Box flexShrink={1} minWidth={0}>
+										<Text wrap="truncate">
+											{agent.description || "Subagent"}
+										</Text>
+									</Box>
+									<Box flexShrink={8} minWidth={0}>
+										<Text dimColor wrap="truncate">
+											{[
+												agent.type,
+												agent.status === "completed" ? null : agent.status,
+											]
+												.filter(Boolean)
+												.join(" · ")}
+										</Text>
+									</Box>
+								</Box>
+							)),
+						)
+					: null,
+				shown.outputs.length > 0
+					? part(
+							"outputs",
+							"Outputs",
+							presses(
+								"outputs-list",
+								shown.outputs.map((path) => ({
+									key: `output-${path}`,
+									label: path,
+									look: "secondary",
+									run: () => save($, path),
+								})),
+							),
+						)
+					: null,
+				shown.changes.length > 0
+					? part(
+							"changes",
+							"Changes",
+							shown.changes.map((repository) => {
+								const files = repository.changes.length;
+								return (
+									<Box
+										key={`repository-${repository.name}`}
+										flexDirection="row"
+										gap={1}
+									>
+										<Box flexShrink={1} minWidth={0}>
+											<Text wrap="truncate">
+												{repository.name}
+												<Text dimColor>
+													{repository.branch ? ` · ${repository.branch}` : ""} ·{" "}
+													{files} {files === 1 ? "file" : "files"}
+												</Text>
+											</Text>
+										</Box>
+										{repository.pullRequest ? (
+											<Link
+												href={repository.pullRequest.url}
+												label={`#${repository.pullRequest.number}`}
+											/>
+										) : null}
+									</Box>
+								);
+							}),
+						)
+					: null,
+				presses("actions", [
+					...(!AT_REST.has(session.status)
+						? [
+								{
+									key: "stop",
+									label: "Stop",
+									look: "secondary" as const,
+									run: () => act($, `${at}/stop`),
+								},
+							]
+						: []),
+					{
+						key: "compact",
+						label: "Compact",
+						look: "secondary",
+						run: () => act($, `${at}/compact`),
+					},
+					{
+						key: "archive",
+						label: "Archive",
+						look: "secondary",
+						run: () => act($, `${at}/archive`),
+					},
+				]),
+			]);
 		};
 
 		const row = (session: PaneSession) => {
 			const isHere = session.id === data.attached;
-			const title = isHere ? (
-				<Text bold wrap="truncate">
-					{session.title}
-				</Text>
-			) : (
-				<Button
-					key={`s-${session.id}`}
-					plain
-					label={session.title}
-					onPress={() => attach(session)}
-				/>
-			);
 			return (
 				<Box key={`session-${session.id}`} flexDirection="column">
 					<Box
@@ -556,18 +606,30 @@ export function registerPane(on: On) {
 						alignItems="center"
 						gap={1}
 						paddingX={1}
-						{...(isHere ? { backgroundColor: "userMessageBackground" } : {})}
-						hover={{ backgroundColor: "userMessageBackground" }}
+						{...(isTerminal
+							? {}
+							: {
+									minHeight: 1.5,
+									borderStyle: "round",
+									borderColor: CLEAR,
+									paddingY: 0,
+								})}
+						{...(isHere ? { backgroundColor: lit } : {})}
+						hover={{ backgroundColor: lit }}
 					>
-						<Text color={MARK[session.status] ?? "inactive"}>
-							{MARK[session.status] ? "●" : " "}
-						</Text>
-						<Box flexGrow={1} flexShrink={1}>
-							{title}
+						{mark(`mark-${session.id}`, MARK[session.status])}
+						<Box flexGrow={1} flexShrink={1} minWidth={0}>
+							<Button
+								key={isHere ? `here-${session.id}` : `s-${session.id}`}
+								plain
+								label={session.title}
+								hover={{ backgroundColor: CLEAR }}
+								onPress={() => (isHere ? refresh($) : attach(session))}
+							/>
 						</Box>
 						{people(session)}
 					</Box>
-					{isHere ? sessionPanel(session) : null}
+					{isHere ? sessionCard(session) : null}
 				</Box>
 			);
 		};
@@ -578,63 +640,83 @@ export function registerPane(on: On) {
 				...listed.map(row),
 				...(list.length > listed.length
 					? [
-							<Box key={`more-row-${owner}`} paddingX={1} paddingLeft={3}>
-								{presses(`more-${owner}`, [
-									{
-										key: `more-${owner}`,
-										label: `${list.length - listed.length} more`,
-										run: () =>
-											update($, more, (ids) => [...(ids ?? []), owner]),
-									},
-								])}
+							<Box key={`more-row-${owner}`} paddingLeft={4}>
+								{press({
+									key: `more-${owner}`,
+									label: `${list.length - listed.length} more`,
+									run: () => update($, more, (ids) => [...(ids ?? []), owner]),
+								})}
 							</Box>,
 						]
 					: []),
 			];
 		};
-		const searchBox = Input ? (
-			<Input
-				key="search"
-				placeholder="Search sessions"
-				value={asked}
-				onSubmit={async (value: string) => {
-					await update($, search, () => value.trim());
-					await refresh($);
-				}}
-			/>
-		) : null;
+
+		/** A space's name, and what it connects to at its end. */
+		const heading = (key: string, name: string, connections: string[] = []) => (
+			<Box key={key} flexDirection="row" gap={2} paddingX={1} marginTop={1}>
+				<Box flexShrink={0}>
+					<Text dimColor bold>
+						{name}
+					</Text>
+				</Box>
+				{connections.length > 0 ? (
+					<Box
+						flexGrow={1}
+						flexShrink={1}
+						minWidth={0}
+						justifyContent="flex-end"
+					>
+						<Text dimColor wrap="truncate">
+							{connections.join(" · ")}
+						</Text>
+					</Box>
+				) : null}
+			</Box>
+		);
 
 		return (
-			<Box flexDirection="column" paddingX={1}>
-				<Box paddingX={1} marginBottom={1}>
-					<Text bold>{data.workspace}</Text>
+			<Box flexDirection="column">
+				<Box
+					flexDirection="row"
+					alignItems="center"
+					justifyContent="space-between"
+					gap={2}
+					paddingX={1}
+				>
+					<Text bold wrap="truncate">
+						{data.workspace}
+					</Text>
+					{Input ? (
+						<Input
+							key="search"
+							placeholder="Search sessions"
+							value={asked}
+							onSubmit={async (value: string) => {
+								await update($, search, () => value.trim());
+								await refresh($);
+							}}
+						/>
+					) : null}
 				</Box>
-				{searchBox}
 				{data.channels.map((channel) => (
-					<Box key={channel.id} flexDirection="column" marginTop={1}>
-						<Box paddingX={1}>
-							<Text dimColor>#{channel.name}</Text>
-						</Box>
+					<Box key={channel.id} flexDirection="column">
+						{heading(
+							`heading-${channel.id}`,
+							`#${channel.name}`,
+							channel.connections,
+						)}
 						{sessions(channel.id, channel.sessions)}
 						{channel.sessions.length === 0 ? (
-							<Box paddingX={1} paddingLeft={3}>
+							<Box paddingLeft={4}>
 								<Text dimColor>No sessions yet</Text>
-							</Box>
-						) : null}
-						{channel.connections.length > 0 ? (
-							<Box paddingX={1} paddingLeft={3}>
-								<Text dimColor wrap="truncate">
-									{channel.connections.join(" · ")}
-								</Text>
 							</Box>
 						) : null}
 					</Box>
 				))}
 				{data.direct.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Box paddingX={1}>
-							<Text dimColor>Private</Text>
-						</Box>
+					<Box flexDirection="column">
+						{heading("heading-direct", "Private")}
 						{sessions("direct", data.direct)}
 					</Box>
 				)}
