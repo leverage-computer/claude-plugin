@@ -147,11 +147,6 @@ export function space(): string | null {
 	return connection?.space ?? null;
 }
 
-/** The Leverage origin this window reaches; empty before it reaches one. */
-export function origin(): string {
-	return connection?.url ?? "";
-}
-
 /** Moves this window to a session. Later steps read after `cursor`. */
 export function follow(id: string, cursor: number) {
 	here.id = id;

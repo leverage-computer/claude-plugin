@@ -19,7 +19,6 @@ import {
 	isReachable,
 	LEVERAGE_TOOLS,
 	leverageRequest,
-	origin,
 } from "./client";
 
 // The Leverage pane, drawn as Claude's session sidebar: the workspace's
@@ -219,9 +218,6 @@ export function registerPane(on: On) {
 		const Select = "Select" in elements ? elements.Select : null;
 		const Svg =
 			e.surface !== "terminal" && "Svg" in elements ? elements.Svg : null;
-		// A desktop draws every Button as a native button, so beyond the
-		// terminal a press is a link in Claude's own text.
-		const asLinks = e.surface !== "terminal";
 		const asked = await read($, search);
 		const open = await read($, more);
 		// The first drawing starts the refresh. A timer outlives this dispatch.
@@ -240,47 +236,21 @@ export function registerPane(on: On) {
 			);
 		}
 		const shown = await read($, panel);
-		const web = `${origin()}/w/${encodeURIComponent(data.workspace)}`;
-		/** A session's page in Leverage: where its links point. */
-		const page = (id: string) => `${web}/session/${encodeURIComponent(id)}`;
 
-		/** Presses in a row: links in Claude's text, or plain terminal buttons. */
-		const presses = (
-			key: string,
-			base: string,
-			items: Press[],
-			isDim = true,
-		) => {
-			if (!asLinks) {
-				return (
-					<Box key={key} flexDirection="row" gap={2} flexWrap="wrap">
-						{items.map((item) => (
-							<Button
-								key={item.key}
-								plain
-								dimColor={isDim}
-								label={item.label}
-								onPress={() => void item.run()}
-							/>
-						))}
-					</Box>
-				);
-			}
-			const href = (item: Press) => `${base}#${encodeURIComponent(item.key)}`;
-			return (
-				<Markdown
-					key={key}
-					dimColor={isDim}
-					text={items
-						.map((item) => `[${plain(item.label)}](${href(item)})`)
-						.join(" · ")}
-					pressableLinks={items.map(href)}
-					onLinkPress={(link) =>
-						void items.find((item) => href(item) === link.href)?.run()
-					}
-				/>
-			);
-		};
+		/** Presses in a row: plain buttons, drawn as text on every surface. */
+		const presses = (key: string, items: Press[], isDim = true) => (
+			<Box key={key} flexDirection="row" gap={2} flexWrap="wrap">
+				{items.map((item) => (
+					<Button
+						key={item.key}
+						plain
+						dimColor={isDim}
+						label={item.label}
+						onPress={() => void item.run()}
+					/>
+				))}
+			</Box>
+		);
 
 		const attach = async (session: PaneSession) => {
 			if (session.id === data.attached) return;
@@ -376,7 +346,6 @@ export function registerPane(on: On) {
 					</Box>
 				);
 			const at = `/sessions/${session.id}`;
-			const base = page(session.id);
 			const model = shown.models.find((one) => one.id === shown.model);
 			const decide = (approval: Approval, decision: string) => {
 				// Decided here, Claude Code's dialog does not ask it again.
@@ -445,7 +414,6 @@ export function registerPane(on: On) {
 											{shown.writable ? (
 												presses(
 													`decide-${approval.id}`,
-													base,
 													[
 														{
 															key: `allow-${approval.id}`,
@@ -483,7 +451,7 @@ export function registerPane(on: On) {
 								shown.queue.map((queued) => (
 									<Box key={`queued-${queued.uuid}`} flexDirection="column">
 										<Text wrap="truncate">{queued.text}</Text>
-										{presses(`queue-${queued.uuid}`, base, [
+										{presses(`queue-${queued.uuid}`, [
 											{
 												key: `send-${queued.uuid}`,
 												label: "Send now",
@@ -523,7 +491,6 @@ export function registerPane(on: On) {
 								"Outputs",
 								presses(
 									"outputs-list",
-									base,
 									shown.outputs.map((path) => ({
 										key: `output-${path}`,
 										label: path,
@@ -541,7 +508,7 @@ export function registerPane(on: On) {
 							)
 						: null}
 					<Box marginTop={1}>
-						{presses("actions", base, [
+						{presses("actions", [
 							...(!AT_REST.has(session.status)
 								? [
 										{
@@ -569,23 +536,14 @@ export function registerPane(on: On) {
 
 		const row = (session: PaneSession) => {
 			const isHere = session.id === data.attached;
-			const link = page(session.id);
 			const title = isHere ? (
 				<Text bold wrap="truncate">
 					{session.title}
 				</Text>
-			) : asLinks ? (
-				<Markdown
-					key={`s-${session.id}`}
-					text={`[${plain(session.title)}](${link})`}
-					pressableLinks={[link]}
-					onLinkPress={() => void attach(session)}
-				/>
 			) : (
 				<Button
 					key={`s-${session.id}`}
 					plain
-					dimColor
 					label={session.title}
 					onPress={() => attach(session)}
 				/>
@@ -621,7 +579,7 @@ export function registerPane(on: On) {
 				...(list.length > listed.length
 					? [
 							<Box key={`more-row-${owner}`} paddingX={1} paddingLeft={3}>
-								{presses(`more-${owner}`, web, [
+								{presses(`more-${owner}`, [
 									{
 										key: `more-${owner}`,
 										label: `${list.length - listed.length} more`,

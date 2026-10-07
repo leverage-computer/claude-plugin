@@ -85,40 +85,6 @@ const PANE = {
 	viewport: { columns: 160, rows: 40, isFullscreen: true },
 } as const;
 
-type Surface = "terminal" | "desktop" | "vscode";
-type Mounted = {
-	press: (target: { key: string; link?: { href: string } }) => Promise<unknown>;
-};
-
-/** Leverage's page of a session, where the pane's links point. */
-const page = (id: string) => `https://leverage.test/w/acme/session/${id}`;
-
-/**
- * Presses something the pane offers: a button on the terminal; beyond it, a
- * link in the Markdown keyed `group`, its href the session page and `item`.
- */
-function pressIn(
-	ui: Mounted,
-	surface: Surface,
-	group: string,
-	item: string,
-	base = page("s-1"),
-) {
-	return surface === "terminal"
-		? ui.press({ key: item })
-		: ui.press({
-				key: group,
-				link: { href: `${base}#${encodeURIComponent(item)}` },
-			});
-}
-
-/** Opens a session from its row: its title is a button or a link. */
-function openRow(ui: Mounted, surface: Surface, id: string) {
-	return surface === "terminal"
-		? ui.press({ key: `s-${id}` })
-		: ui.press({ key: `s-${id}`, link: { href: page(id) } });
-}
-
 // Stands in for Leverage and records what the pane asks of it.
 /** What `leverage claude` starts Claude Code with. */
 const LAUNCHED = {
@@ -314,11 +280,11 @@ for (const surface of ["terminal", "desktop", "vscode"] as const) {
 
 		// What the window's start asked does not count here.
 		leverage.posted.length = 0;
-		await pressIn(ui, surface, "decide-inv-1", "allow-inv-1");
+		await ui.press({ key: "allow-inv-1" });
 		await ui.select({ key: "model", value: "claude-sonnet-4-5" });
 		await ui.select({ key: "effort", value: "low" });
-		await pressIn(ui, surface, "queue-q-1", "send-q-1");
-		await pressIn(ui, surface, "actions", "stop");
+		await ui.press({ key: "send-q-1" });
+		await ui.press({ key: "stop" });
 		expect(leverage.posted).toEqual([
 			["/approvals/inv-1", { decision: "once" }],
 			// The effort carries over when the new model has it.
@@ -329,7 +295,7 @@ for (const surface of ["terminal", "desktop", "vscode"] as const) {
 		]);
 
 		// An output is kept in the working folder, as /leverage save keeps it.
-		await pressIn(ui, surface, "outputs-list", "output-notes/report.md");
+		await ui.press({ key: "output-notes/report.md" });
 		expect(
 			[...leverage.saved].find(([path]) => path.endsWith("report.md"))?.[1],
 		).toBe("# Report");
@@ -341,7 +307,7 @@ test("pressing another session moves the window to it", async ($, on) => {
 	const leverage = fakeLeverage(on);
 	await startWindow($, on, "desktop");
 	const ui = await $.ui.mount({ ...PANE, surface: "desktop" });
-	await openRow(ui, "desktop", "s-2");
+	await ui.press({ key: "s-s-2" });
 	expect(leverage.opened).toContain("s-2");
 	expect(leverage.commands).toContain("clear");
 	// Opened here, it reads as read, and its last turns show.
@@ -434,7 +400,7 @@ test("without leverage claude, the pane reads the CLI's token, and a press runs 
 	expect(leverage.tokens).toContain("https://leverage.test Bearer lev_cl_kept");
 	// Until a session is opened here, the window stays Claude Code's own.
 	expect(tools).toEqual([]);
-	await openRow(ui, "desktop", "s-2");
+	await ui.press({ key: "s-s-2" });
 	expect(leverage.opened).toContain("s-2");
 	expect(tools).toContain("remote_tool");
 });
