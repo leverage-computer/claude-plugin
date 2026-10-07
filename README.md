@@ -47,9 +47,9 @@ own until you press a session in the pane; from then on it runs that session.
   Agent call and in Claude Code's agents view.
 - **The Leverage pane** lists your spaces, their sessions and connections,
   with who else has each session open and who types there. Press a session to
-  open it in this window. Under the session open here, the pane shows its model
-  and effort, the calls that wait on you, the queue, its subagents, the files
-  its last turn wrote and its changes, and lets you act on each.
+  open it in this window. Under the session open here, the pane shows the
+  calls that wait on you, the queue, the files its last turn wrote and its
+  changes, and lets you act on each.
   `/leverage` opens the pane again.
 - **`/leverage help`** lists the actions: approvals, rename, archive and
   restore, model and effort, the queue, outputs, files, a shell command, changes

@@ -3,9 +3,7 @@ import { atom, read, update } from "claude-code";
 
 import type {
 	Approval,
-	Model,
 	PaneSession,
-	PanelAgent,
 	Queued,
 	Repository,
 	SessionPanel,
@@ -24,8 +22,8 @@ import {
 // The Leverage pane, drawn as Claude's session sidebar: the workspace's
 // channels, their sessions, who else is in each, and their connections.
 // A press on a session moves this window to that session. Under the session
-// this window shows, the pane shows and drives it: model, approvals, queue,
-// subagents, outputs and changes.
+// this window shows, the pane shows and drives it: approvals, queue,
+// outputs and changes.
 
 export const PANE = "leverage";
 let isRefreshing = false;
@@ -47,7 +45,6 @@ const MARK: Record<string, string> = {
 const AT_REST = new Set(["idle", "failed", "stopped"]);
 /** The shown session's status at the last read: a change reads it again. */
 let lastStatus: string | null = null;
-let models: Model[] | null = null;
 
 async function call<T>(
 	$: EngineInterface,
@@ -99,35 +96,23 @@ async function readPanel($: EngineInterface, id: string) {
 	const part = <T,>(path: string, empty: T) =>
 		call<T>($, path).catch(() => empty);
 	const at = `/sessions/${id}`;
-	const [session, waiting, queue, agents, outputs, changes] = await Promise.all(
-		[
-			part<{ model: string | null; effort: string | null }>(at, {
-				model: null,
-				effort: null,
-			}),
-			part<{ writable: boolean; approvals: Approval[]; question: unknown }>(
-				`${at}/waiting`,
-				{ writable: false, approvals: [], question: null },
-			),
-			part<Queued[]>(`${at}/queue`, []),
-			part<PanelAgent[]>(`${at}/agents`, []),
-			part<string[]>(`${at}/outputs`, []),
-			part<Repository[]>(`${at}/changes`, []),
-		],
-	);
-	models ??= await part<Model[]>("/models", []);
+	const [waiting, queue, outputs, changes] = await Promise.all([
+		part<{ writable: boolean; approvals: Approval[]; question: unknown }>(
+			`${at}/waiting`,
+			{ writable: false, approvals: [], question: null },
+		),
+		part<Queued[]>(`${at}/queue`, []),
+		part<string[]>(`${at}/outputs`, []),
+		part<Repository[]>(`${at}/changes`, []),
+	]);
 	// The window may have moved on while this read.
 	if (id !== here.id) return;
 	await update($, panel, () => ({
 		session: id,
-		model: session.model,
-		effort: session.effort,
-		models: models ?? [],
 		approvals: waiting.approvals,
 		writable: waiting.writable,
 		question: Boolean(waiting.question),
 		queue,
-		agents,
 		outputs,
 		changes,
 	}));
@@ -219,10 +204,9 @@ export function registerPane(on: On) {
 		const elements = $.ui.resolve(e);
 		const { Box, Text, Button, Link } = elements;
 		const isTerminal = e.surface === "terminal";
-		// A phone has no text field or picker: it lists every session, and the
-		// model shows as text. Only a surface beyond the terminal draws pictures.
+		// A phone has no text field: it lists every session. Only a surface
+		// beyond the terminal draws pictures.
 		const Input = "Input" in elements ? elements.Input : null;
-		const Select = "Select" in elements ? elements.Select : null;
 		const Svg = !isTerminal && "Svg" in elements ? elements.Svg : null;
 		const lit = isTerminal ? LIT.terminal : LIT.other;
 		const asked = await read($, search);
@@ -379,58 +363,14 @@ export function registerPane(on: On) {
 					{children}
 				</Box>
 			);
-			if (!shown || shown.session !== session.id)
-				return card(<Text dimColor>Reading the session…</Text>);
+			if (!shown || shown.session !== session.id) return null;
 			const at = `/sessions/${session.id}`;
-			const model = shown.models.find((one) => one.id === shown.model);
 			const decide = (approval: Approval, decision: string) => {
 				// Decided here, Claude Code's dialog does not ask it again.
 				here.known.add(approval.id);
 				return act($, `/approvals/${approval.id}`, { decision });
 			};
-			return card([
-				Select && shown.models.length > 0 ? (
-					<Box key="model-row" flexDirection="row" gap={1} flexWrap="wrap">
-						<Select
-							key="model"
-							label="Model"
-							options={shown.models.map((one) => ({
-								value: one.id,
-								label: one.label,
-							}))}
-							{...(shown.model ? { value: shown.model } : {})}
-							onSelect={(value: string) =>
-								act($, `${at}/model`, {
-									model: value,
-									// The effort carries over when the new model has it.
-									effort: shown.models
-										.find((one) => one.id === value)
-										?.efforts.includes(shown.effort ?? "")
-										? shown.effort
-										: null,
-								})
-							}
-						/>
-						{model && model.efforts.length > 0 ? (
-							<Select
-								key="effort"
-								options={model.efforts.map((effort) => ({ value: effort }))}
-								{...(shown.effort ? { value: shown.effort } : {})}
-								onSelect={(value: string) =>
-									act($, `${at}/model`, { model: model.id, effort: value })
-								}
-							/>
-						) : null}
-					</Box>
-				) : (
-					<Box key="model-row" flexDirection="row" gap={1}>
-						<Text dimColor>Model</Text>
-						<Text wrap="truncate">
-							{model?.label ?? shown.model ?? "the space's default"}
-							{shown.effort ? ` · ${shown.effort}` : ""}
-						</Text>
-					</Box>
-				),
+			const parts = [
 				shown.approvals.length > 0 || shown.question
 					? part(
 							"waiting",
@@ -492,36 +432,6 @@ export function registerPane(on: On) {
 							),
 						)
 					: null,
-				shown.agents.length > 0
-					? part(
-							"agents",
-							"Subagents",
-							shown.agents.map((agent) => (
-								<Box key={`agent-${agent.task}`} flexDirection="row" gap={1}>
-									{mark(
-										`agent-mark-${agent.task}`,
-										agent.running ? "claude" : "inactive",
-										agent.running ? "●" : "○",
-									)}
-									<Box flexShrink={1} minWidth={0}>
-										<Text wrap="truncate">
-											{agent.description || "Subagent"}
-										</Text>
-									</Box>
-									<Box flexShrink={8} minWidth={0}>
-										<Text dimColor wrap="truncate">
-											{[
-												agent.type,
-												agent.status === "completed" ? null : agent.status,
-											]
-												.filter(Boolean)
-												.join(" · ")}
-										</Text>
-									</Box>
-								</Box>
-							)),
-						)
-					: null,
 				shown.outputs.length > 0
 					? part(
 							"outputs",
@@ -569,31 +479,8 @@ export function registerPane(on: On) {
 							}),
 						)
 					: null,
-				presses("actions", [
-					...(!AT_REST.has(session.status)
-						? [
-								{
-									key: "stop",
-									label: "Stop",
-									look: "secondary" as const,
-									run: () => act($, `${at}/stop`),
-								},
-							]
-						: []),
-					{
-						key: "compact",
-						label: "Compact",
-						look: "secondary",
-						run: () => act($, `${at}/compact`),
-					},
-					{
-						key: "archive",
-						label: "Archive",
-						look: "secondary",
-						run: () => act($, `${at}/archive`),
-					},
-				]),
-			]);
+			].filter(Boolean);
+			return parts.length > 0 ? card(parts) : null;
 		};
 
 		const row = (session: PaneSession) => {

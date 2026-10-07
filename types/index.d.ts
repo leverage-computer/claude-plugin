@@ -17,19 +17,10 @@ export type WorkspaceTree = {
 	direct: PaneSession[];
 };
 
-export type Model = { id: string; label: string; efforts: string[] };
 /** A call that waits on a person's approval. */
 export type Approval = { id: string; tool: string; input: unknown };
 /** A prompt that waits for the running turn to end. */
 export type Queued = { uuid: string; text: string };
-/** A subagent the last turn started. */
-export type PanelAgent = {
-	task: string;
-	description: string;
-	type: string | null;
-	running: boolean;
-	status: string | null;
-};
 /** A repository the session changed, and its pull request. */
 export type Repository = {
 	name: string;
@@ -41,16 +32,12 @@ export type Repository = {
 /** What the pane shows under the session this window shows. */
 export type SessionPanel = {
 	session: string;
-	model: string | null;
-	effort: string | null;
-	models: Model[];
 	approvals: Approval[];
 	/** Whether this person may answer what waits. */
 	writable: boolean;
 	/** A question waits, which Claude Code's own dialog asks. */
 	question: boolean;
 	queue: Queued[];
-	agents: PanelAgent[];
 	outputs: string[];
 	changes: Repository[];
 };

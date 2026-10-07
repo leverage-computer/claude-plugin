@@ -52,15 +52,6 @@ const PANEL: Record<string, unknown> = {
 		question: null,
 	},
 	queue: [{ uuid: "q-1", text: "then fix the copy" }],
-	agents: [
-		{
-			task: "t-1",
-			description: "Find the flake",
-			type: "Explore",
-			running: true,
-			status: null,
-		},
-	],
 	outputs: ["notes/report.md"],
 	changes: [
 		{
@@ -273,25 +264,17 @@ for (const surface of ["terminal", "desktop", "vscode"] as const) {
 		const ui = await $.ui.mount({ ...PANE, surface });
 		await expect(ui.find({ text: /npm test/ })).resolves.toBeDefined();
 		await expect(ui.find({ text: /then fix the copy/ })).resolves.toBeDefined();
-		await expect(ui.find({ text: /Find the flake/ })).resolves.toBeDefined();
 		await expect(ui.find({ text: /login-fix/ })).resolves.toBeDefined();
-		// Only the session here has a panel.
-		expect(await ui.findAll({ key: "model" })).toHaveLength(1);
+		// Only the session here has a card.
+		expect(await ui.findAll({ key: "allow-inv-1" })).toHaveLength(1);
 
 		// What the window's start asked does not count here.
 		leverage.posted.length = 0;
 		await ui.press({ key: "allow-inv-1" });
-		await ui.select({ key: "model", value: "claude-sonnet-4-5" });
-		await ui.select({ key: "effort", value: "low" });
 		await ui.press({ key: "send-q-1" });
-		await ui.press({ key: "stop" });
 		expect(leverage.posted).toEqual([
 			["/approvals/inv-1", { decision: "once" }],
-			// The effort carries over when the new model has it.
-			["/sessions/s-1/model", { model: "claude-sonnet-4-5", effort: "high" }],
-			["/sessions/s-1/model", { model: "claude-opus-4-5", effort: "low" }],
 			["/sessions/s-1/queue/q-1/send", {}],
-			["/sessions/s-1/stop", {}],
 		]);
 
 		// An output is kept in the working folder, as /leverage save keeps it.
