@@ -12,7 +12,7 @@ Leverage, and they can join it from there.
 ## Install
 
 ```sh
-claude plugin marketplace add thepresciencecompany/claude
+claude plugin marketplace add leverage-computer/claude-plugin
 claude plugin install leverage@leverage
 ```
 
