@@ -403,6 +403,6 @@ test("with no token anywhere, /leverage says how to get one", async ($, on) => {
 		command: "leverage",
 		args: "",
 	} as never);
-	expect(answer.text).toContain("leverage claude");
+	expect(answer.text).toContain("/leverage login");
 	expect(tools).toEqual([]);
 });
