@@ -5,8 +5,8 @@
 <a href=".claude-plugin/plugin.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fleverage-computer%2Fclaude-plugin%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=Version&labelColor=0a0a0a&color=3f3f46" alt="Plugin version"></a>
 <a href="#requirements"><img src="https://img.shields.io/badge/Claude%20Code-%E2%89%A52.1.286-3f3f46?labelColor=0a0a0a" alt="Claude Code 2.1.286 or later"></a>
 
-[Install](#install) · [Use](#use) ·
-[What you get](#what-you-get) · [Access](#access) · [leverage.computer](https://leverage.computer)
+[Install](#install) · [Usage](#usage) ·
+[Features](#features) · [Access](#access) · [leverage.computer](https://leverage.computer)
 
 [![Setting up Leverage in Claude Code: add the marketplace, install the plugin, open a session from /leverage, and prompt it](docs/setup.gif)](docs/setup.mp4)
 
@@ -24,7 +24,7 @@ claude plugin marketplace add leverage-computer/claude-plugin
 claude plugin install leverage@leverage
 ```
 
-## Use
+## Usage
 
 - `/leverage login`: sign in, and approve in the browser.
 - `/leverage`: open the pane.
@@ -36,7 +36,7 @@ To start a new session in a space, use the Leverage CLI:
 leverage claude <space>
 ```
 
-## What you get
+## Features
 
 - **One session, two places.** Text and thinking stream as Leverage writes
   them.
