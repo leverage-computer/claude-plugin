@@ -12,7 +12,7 @@ open a session from `/leverage`, and send it a prompt.
 ## Requirements
 
 - Claude Code 2.1.286 or later
-- The Leverage CLI, signed in (`leverage login`)
+- A Leverage account
 
 ## Install
 
@@ -35,25 +35,15 @@ claude plugin install leverage@leverage
 
 ## Use
 
-In any Claude Code window, as one you start with `claude` or one in Claude
-Desktop, `/leverage` opens the Leverage pane. Press a session there: click it,
-or press ctrl+x tab, Tab to the session, then Enter. The window stays Claude
-Code's own until you press a session; from then on it runs that session, and
-your prompts go to it.
+Run `/leverage login` and approve in the browser, then `/leverage` to open the
+pane. Press a session to run it here: click it, or ctrl+x tab, Tab to it,
+Enter.
 
-The pane needs the token the Leverage CLI keeps, so run `leverage claude` once
-on this machine first. See [Your token](#your-token).
-
-To start a new session in a space, or to open one session directly, start
-Claude Code from the CLI:
+To start a new session in a space, use the Leverage CLI:
 
 ```sh
 leverage claude <space>
-leverage claude --session <id>
 ```
-
-The first prompt starts a session in the space. Like every new session in a
-space, it is private until you share it.
 
 ## What you get
 
@@ -79,14 +69,11 @@ space, it is private until you share it.
   and pull requests, skills, connectors and history. `/compact` and
   `/rename` act on the Leverage session.
 
-## Your token
+## Access
 
-`leverage claude` keeps a Claude Code token for your workspace and starts
-Claude Code with it. Other Claude Code windows read the same token from the
-Leverage CLI's config. The plugin acts only with that token; without one,
-`/leverage` says how to get it. `leverage login` and `leverage logout` drop
-the kept token; run `leverage claude` again after either. To revoke the token,
-open Leverage Settings → External harnesses → Claude Code.
+The plugin uses the token in `~/.claude/leverage.json`, or your Leverage CLI
+config. Set it up with `/leverage login`; `/leverage logout` removes it.
+Leverage Settings → Integrations revokes it.
 
 ## License
 

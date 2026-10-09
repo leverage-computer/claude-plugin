@@ -12,7 +12,12 @@ export type Connection = {
 	space: string | null;
 };
 
+/** Where Leverage is, unless LEVERAGE_HOST names another. */
+const PRODUCTION = "https://app.leverage.computer";
+
 let connection: Connection | null = null;
+/** Where the connection came from: `leverage claude`, `/leverage login` or the CLI's config. */
+let source: "launched" | "saved" | "kept" | null = null;
 
 /** The session this window shows, and the last row it read. */
 export const here = {
@@ -65,6 +70,7 @@ export function connectLaunched(env: {
 		space: env.space || null,
 	};
 	if (env.session) here.id = env.session;
+	source = "launched";
 	isClientWindow = true;
 	return true;
 }
@@ -75,6 +81,17 @@ export function connectLaunched(env: {
  * runs a session's turns only once the person opens one there.
  */
 export function connectKept(config: string): boolean {
+	const kept = keptToken(config);
+	if (!kept) return false;
+	connection = { ...kept, space: null };
+	source = "kept";
+	return true;
+}
+
+/** The Claude Code token in the Leverage CLI's config, and its host; or null. */
+export function keptToken(
+	config: string,
+): { url: string; token: string } | null {
 	let parsed: {
 		currentHost?: string;
 		hosts?: Record<
@@ -88,7 +105,7 @@ export function connectKept(config: string): boolean {
 	try {
 		parsed = JSON.parse(config);
 	} catch {
-		return false;
+		return null;
 	}
 	const hosts = parsed.hosts ?? {};
 	// The signed-in host first, then any other that keeps one.
@@ -99,10 +116,76 @@ export function connectKept(config: string): boolean {
 			? profile.accessTokens?.claude?.[profile.workspaceId]
 			: undefined;
 		if (!token) continue;
-		connection = { url: host.replace(/\/+$/, ""), token, space: null };
-		return true;
+		return { url: host.replace(/\/+$/, ""), token };
 	}
-	return false;
+	return null;
+}
+
+/**
+ * Takes the token `/leverage login` saved in Claude Code's config. Like the
+ * CLI's, it lists the sessions in the pane until the person opens one.
+ */
+export function connectSaved(saved: string): boolean {
+	let parsed: { url?: string; token?: string };
+	try {
+		parsed = JSON.parse(saved);
+	} catch {
+		return false;
+	}
+	if (!parsed.url || !parsed.token) return false;
+	connection = {
+		url: parsed.url.replace(/\/+$/, ""),
+		token: parsed.token,
+		space: null,
+	};
+	source = "saved";
+	return true;
+}
+
+const isAbsolute = (path: string) => /^(\/|[A-Za-z]:[\\/])/.test(path);
+
+/**
+ * The file `/leverage login` keeps its token in, in Claude Code's config; or
+ * null with no home folder, so no token is ever read from or left in a project.
+ */
+export function accessPath(
+	configDir: string | undefined,
+	home: string | undefined,
+): string | null {
+	const dir = configDir || (home ? `${home}/.claude` : "");
+	return isAbsolute(dir) ? `${dir}/leverage.json` : null;
+}
+
+/** The Leverage CLI's config file; or null with no home folder. */
+export function cliConfigPath(
+	configDir: string | undefined,
+	xdg: string | undefined,
+	home: string | undefined,
+): string | null {
+	const dir =
+		configDir ||
+		(xdg ? `${xdg}/leverage` : home ? `${home}/.config/leverage` : "");
+	return isAbsolute(dir) ? `${dir}/config.json` : null;
+}
+
+/** The Leverage `/leverage login` signs in to: LEVERAGE_HOST's, or the app. */
+export function leverageHost(named: string | undefined): string {
+	const host = named?.trim();
+	if (!host) return PRODUCTION;
+	try {
+		const url = new URL(/^[a-z]+:\/\//i.test(host) ? host : `https://${host}`);
+		return /^https?:$/.test(url.protocol) ? url.origin : PRODUCTION;
+	} catch {
+		return PRODUCTION;
+	}
+}
+
+/** Leaves Leverage: this window is Claude Code's own again. */
+export function disconnect() {
+	connection = null;
+	source = null;
+	isClientWindow = false;
+	follow("", 0);
 }
 
 /** From now on, this window runs the turns of the session it follows. */
@@ -136,6 +219,10 @@ export const LEVERAGE_TOOLS = [...MIRRORED, "remote_tool"].map((name) => ({
 /** Whether the pane and /leverage can reach Leverage. */
 export function isReachable(): boolean {
 	return connection !== null;
+}
+
+export function connectedBy() {
+	return source;
 }
 
 /** Whether this window runs a Leverage session's turns. */

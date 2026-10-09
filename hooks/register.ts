@@ -3,12 +3,17 @@ import { update } from "claude-code";
 
 import type { Room, WorkspaceTree } from "../types";
 import {
+	accessPath,
+	cliConfigPath,
+	connectedBy,
 	connectKept,
 	connectLaunched,
+	connectSaved,
 	drawn,
 	follow,
 	here,
 	isClient,
+	isReachable,
 	LEVERAGE_TOOLS,
 	leverageRequest,
 	MIRRORED,
@@ -109,7 +114,9 @@ async function call<T>(
 	if (!res.ok) {
 		throw new Error(
 			res.status === 401
-				? "Leverage refused this Claude Code token. Run leverage claude again."
+				? connectedBy() === "launched"
+					? "Leverage refused this Claude Code token. Run leverage claude again."
+					: "Leverage refused this Claude Code token. /leverage login signs in again."
 				: `Leverage answered ${res.status}: ${res.text}`,
 		);
 	}
@@ -366,13 +373,23 @@ function nativeResult(
 	return content;
 }
 
+/** The token `/leverage login` keeps in Claude Code's config; or "{}". */
+async function savedAccess($: EngineInterface): Promise<string> {
+	const file = accessPath(
+		await $.env.get("CLAUDE_CONFIG_DIR"),
+		await $.env.get("HOME"),
+	);
+	return file ? $.fs.read(file).catch(() => "{}") : "{}";
+}
+
 /** The Leverage CLI's config, where it keeps its Claude Code token; or "{}". */
 async function keptConfig($: EngineInterface): Promise<string> {
-	const home = await $.env.get("HOME");
-	const dir =
-		(await $.env.get("LEVERAGE_CONFIG_DIR")) ||
-		`${(await $.env.get("XDG_CONFIG_HOME")) || `${home}/.config`}/leverage`;
-	return $.fs.read(`${dir}/config.json`).catch(() => "{}");
+	const file = cliConfigPath(
+		await $.env.get("LEVERAGE_CONFIG_DIR"),
+		await $.env.get("XDG_CONFIG_HOME"),
+		await $.env.get("HOME"),
+	);
+	return file ? $.fs.read(file).catch(() => "{}") : "{}";
 }
 
 export const register: Register = (on) => {
@@ -393,8 +410,10 @@ export const register: Register = (on) => {
 			space: await $.env.get("LEVERAGE_CLAUDE_SPACE"),
 			session: await $.env.get("LEVERAGE_CLAUDE_SESSION"),
 		});
-		// Any other window, as Claude Desktop's, reads the token the CLI keeps.
-		if (!launched && !connectKept(await keptConfig($))) return result;
+		// Any other window, as Claude Desktop's, takes the token /leverage login
+		// keeps, or the one the Leverage CLI keeps.
+		if (!launched && !connectSaved(await savedAccess($)))
+			connectKept(await keptConfig($));
 		if (launched) {
 			for (const tool of LEVERAGE_TOOLS) await $.tool.register(tool);
 			// A window opened on a session starts at its newest row.
@@ -408,8 +427,9 @@ export const register: Register = (on) => {
 			}
 			await showLabel($);
 		}
-		void $.ui.open({ id: PANE, title: "Leverage" });
+		if (isReachable()) void $.ui.open({ id: PANE, title: "Leverage" });
 		// Turns started from another client open a turn here, so both show it.
+		// The poll runs from the start, so a later /leverage login needs no restart.
 		$.clock.every(1500, async () => {
 			if (!isClient() || !here.id) return;
 			const { prompts, notices, last, viewers, typing } = await call<
@@ -723,6 +743,9 @@ export const register: Register = (on) => {
 
 	on("tool.call", async ($, e, next) => {
 		const id = e.tool_use_id ?? "";
+		// Registered tools stay offered after logout; none runs then.
+		if (!isClient() && e.tool.startsWith("mcp__leverage__"))
+			return { deny: "This window is not connected to Leverage." };
 		if (!isClient() || !here.calls.has(id)) return next(e);
 		// Claude Code runs the subagent; its steps come from Leverage.
 		if (here.agents.has(id)) return next(e);

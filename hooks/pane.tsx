@@ -221,8 +221,7 @@ export function registerPane(on: On) {
 		if (!data) {
 			return (
 				<Text dimColor wrap="wrap">
-					Connecting to Leverage… Run leverage claude once in a terminal if it
-					never does: the pane reads the token it keeps.
+					Connecting to Leverage… If it never does, /leverage login signs in.
 				</Text>
 			);
 		}
