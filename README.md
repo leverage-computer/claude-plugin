@@ -6,7 +6,7 @@
 <a href="#requirements"><img src="https://img.shields.io/badge/Claude%20Code-%E2%89%A52.1.286-3f3f46?labelColor=0a0a0a" alt="Claude Code 2.1.286 or later"></a>
 
 [Install](#install) · [Usage](#usage) ·
-[Features](#features) · [Access](#access) · [leverage.computer](https://leverage.computer)
+[Features](#features) · [leverage.computer](https://leverage.computer)
 
 [![Setting up Leverage in Claude Code: add the marketplace, install the plugin, open a session from /leverage, and prompt it](docs/setup.gif)](docs/setup.mp4)
 
@@ -50,13 +50,6 @@ leverage claude <space>
 - **The Leverage pane** lists your spaces, their sessions.
   `/leverage` opens the pane again.
 - **`/leverage help`** lists the actions you can do with Leverage mod.
-
-## Access
-
-- The plugin uses the token in `~/.claude/leverage.json`, or your Leverage CLI
-  config.
-- `/leverage login` sets it up. `/leverage logout` removes it.
-- Leverage Settings → Integrations revokes it.
 
 ## License
 
