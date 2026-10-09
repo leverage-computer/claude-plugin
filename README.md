@@ -40,15 +40,27 @@ leverage claude <space>
 
 - **One session, two places.** Text and thinking stream as Leverage writes
   them.
+
+  [![Starting a session in a space and getting an answer](docs/first-session.gif)](docs/first-session.mp4)
+
 - **Teammates.** Shared visibility of our messages, status, typing indicators
   inside of Claude Code.
+
+  [![A teammate joins the session, types, and sends a prompt from Leverage](docs/teammates.gif)](docs/teammates.mp4)
+
 - **Steering.** Enter over a running turn steers it. ctrl+x enter keeps the
   prompt in Claude Code's queue, where you can edit it or take it back, until
   its turn starts.
 - **Approvals and questions** show in Claude Code's own dialogs.
+
+  [![Approving a command in Claude Code's own dialog](docs/approvals.gif)](docs/approvals.mp4)
+
 - **Subagents** run Leverage subagents as Claude Code's own agents.
 - **The Leverage pane** lists your spaces, their sessions.
   `/leverage` opens the pane again.
+
+  [![Opening the pane, jumping to a session, and working in it](docs/sessions.gif)](docs/sessions.mp4)
+
 - **`/leverage help`** lists the actions you can do with Leverage mod.
 
 ## License
