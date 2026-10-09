@@ -4,9 +4,9 @@ Use Claude Code as a window on a Leverage session. The turn runs in Leverage,
 and Claude Code shows it as its own. Your teammates see the same session in
 Leverage, and they can join it from there.
 
-[![Setting up Leverage in Claude Code: add the marketplace, install the plugin, open a session from /leverage, and prompt it](docs/setup.png)](docs/setup.mp4)
+[![Setting up Leverage in Claude Code: add the marketplace, install the plugin, open a session from /leverage, and prompt it](docs/setup.gif)](docs/setup.mp4)
 
-[Watch the setup](docs/setup.mp4) (51s): install the plugin from Claude Code,
+[Watch the video](docs/setup.mp4) (15s): install the plugin from Claude Code,
 open a session from `/leverage`, and send it a prompt.
 
 ## Requirements
