@@ -19,7 +19,7 @@ import { PANE } from "./pane";
 // `/leverage <action>`: what the other Leverage apps do with a session,
 // done on the session this window shows. Bare, it opens the pane.
 
-const HELP = `/leverage                 open the pane: spaces, sessions, connections
+const HELP = `/leverage                 open the pane: spaces and their sessions
 /leverage login [workspace]  sign in in the browser
 /leverage logout          forget the token here
 /leverage approvals       ask again for calls that wait on you
@@ -463,7 +463,6 @@ async function keep(
 	// A new token may name another workspace: nothing of the last one stays.
 	disconnect();
 	await update($, { plugin: "leverage", key: "tree" }, () => null);
-	await update($, { plugin: "leverage", key: "panel" }, () => null);
 	connectSaved(saved);
 	void $.ui.open({ id: PANE, title: "Leverage" });
 	return `Signed in to ${workspace}. /leverage opens the pane.`;

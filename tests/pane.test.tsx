@@ -11,56 +11,13 @@ const TREE: WorkspaceTree = {
 			id: "C1",
 			name: "onboarding",
 			sessions: [
-				{
-					id: "s-1",
-					title: "login bug",
-					status: "awaiting_input",
-					viewers: [],
-					typing: [],
-				},
-				{
-					id: "s-2",
-					title: "pricing copy",
-					status: "idle",
-					viewers: [
-						{ name: "Grace Hopper", state: "active", apps: ["codex"] },
-						{ name: "Alan Turing", state: "idle", apps: [] },
-					],
-					typing: [],
-				},
+				{ id: "s-1", title: "login bug", status: "awaiting_input" },
+				{ id: "s-2", title: "pricing copy", status: "idle" },
 			],
-			connections: ["acme/web", "Linear"],
 		},
-		{ id: "C2", name: "billing", sessions: [], connections: [] },
+		{ id: "C2", name: "billing", sessions: [] },
 	],
-	direct: [
-		{
-			id: "s-3",
-			title: "scratch",
-			status: "idle",
-			viewers: [{ name: "Ada Lovelace", state: "active", apps: [] }],
-			typing: ["Ada Lovelace"],
-		},
-	],
-};
-
-/** What Leverage answers about the session here, by the path's last part. */
-const PANEL: Record<string, unknown> = {
-	waiting: {
-		writable: true,
-		approvals: [{ id: "inv-1", tool: "Bash", input: { command: "npm test" } }],
-		question: null,
-	},
-	queue: [{ uuid: "q-1", text: "then fix the copy" }],
-	outputs: ["notes/report.md"],
-	changes: [
-		{
-			name: "acme/web",
-			branch: "login-fix",
-			changes: [{ path: "src/login.ts" }],
-			pullRequest: { number: 12, url: "https://github.com/acme/web/pull/12" },
-		},
-	],
+	direct: [{ id: "s-3", title: "scratch", status: "idle" }],
 };
 
 const PANE = {
@@ -90,17 +47,6 @@ function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 	const histories: string[] = [];
 	const queries: (string | null)[] = [];
 	const commands: string[] = [];
-	const posted: [string, unknown][] = [];
-	const saved = new Map<string, string>();
-	const toasts: string[] = [];
-	on("fs.write", (_, e) => {
-		saved.set(e.path, e.text);
-		return { value: undefined };
-	});
-	on("ui.toast", (_, e) => {
-		toasts.push(e.text);
-		return { value: undefined };
-	});
 	const tokens: string[] = [];
 	mock.env(on, env);
 	const clock = mock.clock(on);
@@ -111,36 +57,14 @@ function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 		tokens.push(`${url.origin} ${headers.authorization}`);
 		if (path === "/api/claude/workspace")
 			queries.push(url.searchParams.get("query"));
-		if (e.init?.method === "POST")
-			posted.push([
-				path.replace("/api/claude", ""),
-				JSON.parse(e.init.body ?? "{}"),
-			]);
 		const { attached: _, ...tree } = TREE;
 		let answer: unknown = tree;
 		const [, id, action] =
 			path.match(/^\/api\/claude\/sessions\/([^/]+)\/?(.*)$/) ?? [];
 		if (id && !action) {
 			opened.push(id);
-			answer = {
-				id,
-				title: id,
-				cursor: 7,
-				model: "claude-opus-4-5",
-				effort: "high",
-			};
+			answer = { id, title: id, cursor: 7 };
 		}
-		if (path === "/api/claude/models") {
-			answer = [
-				{ id: "claude-opus-4-5", label: "Opus", efforts: ["low", "high"] },
-				{ id: "claude-sonnet-4-5", label: "Sonnet", efforts: ["low", "high"] },
-			];
-		}
-		if (action && action in PANEL) answer = PANEL[action];
-		if (action === "file") answer = { content: "# Report" };
-		if (path.startsWith("/api/claude/approvals/") || action === "model")
-			answer = { ok: true };
-		if (action?.startsWith("queue/")) answer = { ok: true };
 		if (action === "read") {
 			read.push(id ?? "");
 			answer = { ok: true };
@@ -200,9 +124,6 @@ function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 		queries,
 		commands,
 		clock,
-		posted,
-		saved,
-		toasts,
 		tokens,
 	};
 }
@@ -232,57 +153,15 @@ function engineStart(on: On) {
 }
 
 for (const surface of ["terminal", "desktop", "vscode"] as const) {
-	test(`the pane lists channels, sessions, who is in them and connections on ${surface}`, async ($, on) => {
+	test(`the pane lists spaces and their sessions on ${surface}`, async ($, on) => {
 		fakeLeverage(on);
 		await startWindow($, on, surface);
 		const ui = await $.ui.mount({ ...PANE, surface });
 		await expect(ui.find({ text: /#onboarding/ })).resolves.toBeDefined();
 		await expect(ui.find({ key: "s-s-2" })).resolves.toBeDefined();
 		await expect(ui.find({ key: "s-s-3" })).resolves.toBeDefined();
-		await expect(
-			ui.find({ text: /acme\/web · Linear/ }),
-		).resolves.toBeDefined();
-		// Who else has each session open, and who types there: faces on a
-		// surface that draws pictures, names on the terminal.
-		if (surface === "terminal") {
-			await expect(ui.find({ text: /Grace \+1/ })).resolves.toBeDefined();
-		} else {
-			const faces = await ui.findAll({ type: "Svg" });
-			expect(faces.map((one) => one.props.alt)).toEqual([
-				"Grace Hopper has it open",
-				"Alan Turing has it open",
-			]);
-		}
-		await expect(ui.find({ text: /Ada types…/ })).resolves.toBeDefined();
 		// The session here is not one to open again.
 		await expect(ui.find({ key: "s-s-1" })).resolves.toBeUndefined();
-	});
-
-	test(`under the session here, the pane shows and drives it on ${surface}`, async ($, on) => {
-		const leverage = fakeLeverage(on);
-		await startWindow($, on, surface);
-		const ui = await $.ui.mount({ ...PANE, surface });
-		await expect(ui.find({ text: /npm test/ })).resolves.toBeDefined();
-		await expect(ui.find({ text: /then fix the copy/ })).resolves.toBeDefined();
-		await expect(ui.find({ text: /login-fix/ })).resolves.toBeDefined();
-		// Only the session here has a card.
-		expect(await ui.findAll({ key: "allow-inv-1" })).toHaveLength(1);
-
-		// What the window's start asked does not count here.
-		leverage.posted.length = 0;
-		await ui.press({ key: "allow-inv-1" });
-		await ui.press({ key: "send-q-1" });
-		expect(leverage.posted).toEqual([
-			["/approvals/inv-1", { decision: "once" }],
-			["/sessions/s-1/queue/q-1/send", {}],
-		]);
-
-		// An output is kept in the working folder, as /leverage save keeps it.
-		await ui.press({ key: "output-notes/report.md" });
-		expect(
-			[...leverage.saved].find(([path]) => path.endsWith("report.md"))?.[1],
-		).toBe("# Report");
-		expect(leverage.toasts).toContain("Saved report.md.");
 	});
 }
 
@@ -296,6 +175,9 @@ test("pressing another session moves the window to it", async ($, on) => {
 	// Opened here, it reads as read, and its last turns show.
 	expect(leverage.read.at(-1)).toBe("s-2");
 	expect(leverage.histories.at(-1)).toBe("s-2");
+	// The pane marks the new session as the one here; the old one opens again.
+	await expect(ui.find({ key: "here-s-2" })).resolves.toBeDefined();
+	await expect(ui.find({ key: "s-s-1" })).resolves.toBeDefined();
 });
 
 test("a search lists the sessions whose titles hold it", async ($, on) => {
