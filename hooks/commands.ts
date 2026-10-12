@@ -38,13 +38,10 @@ const HELP = `/leverage                 open the pane: spaces and their sessions
 /leverage changes         each repository's changes and pull request
 /leverage skills          the skills this session can load
 /leverage skill <name> <prompt>  send a prompt that loads a skill
-/leverage connectors      the workspace's connectors
-/leverage history [more]  the session's last turns, then older ones`;
+/leverage connectors      the workspace's connectors`;
 
 /** The most a file shows in the transcript. */
 const SHOWN_CHARS = 20_000;
-/** Where the next older page of history starts, once one was shown. */
-let olderFrom: number | null = null;
 
 async function call<T>(
 	$: EngineInterface,
@@ -333,19 +330,6 @@ async function run($: EngineInterface, args: string): Promise<string> {
 			here.skill = name;
 			await $.prompt.submit({ text: prompt, asUser: true });
 			return `Sent with the ${name} skill.`;
-		}
-		case "history": {
-			if (tail === "more" && olderFrom === null) return "No older turns.";
-			const from = tail === "more" ? `&before=${olderFrom}` : "";
-			const page = await call<{
-				messages: { author: string; text: string }[];
-				before: number | null;
-			}>($, `/sessions/${here.id}/history?turns=5${from}`);
-			olderFrom = page.before;
-			const text = page.messages
-				.map((message) => `${message.author}: ${message.text}`)
-				.join("\n\n");
-			return `${text || "No turns yet."}${page.before === null ? "" : "\n\n/leverage history more shows older turns."}`;
 		}
 	}
 	return HELP;
