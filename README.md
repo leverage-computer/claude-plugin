@@ -5,47 +5,41 @@
 <a href=".claude-plugin/plugin.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fleverage-computer%2Fclaude-plugin%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=Version&labelColor=0a0a0a&color=3f3f46" alt="Plugin version"></a>
 <a href="#requirements"><img src="https://img.shields.io/badge/Claude%20Code-%E2%89%A52.1.286-3f3f46?labelColor=0a0a0a" alt="Claude Code 2.1.286 or later"></a>
 
-[Features](#features) · [Install](#install) · [Usage](#usage) ·
-[leverage.computer](https://leverage.computer)
+[Features](#features) · [Recordings](#recordings) · [Install](#install) ·
+[Usage](#usage) · [leverage.computer](https://leverage.computer)
 
 [![Setting up Leverage in Claude Code: add the marketplace, install the plugin, open a session from /leverage, and prompt it](docs/setup.gif)](docs/setup.mp4)
 
 ## Features
 
-- [**Multiplayer harness**](#multiplayer-harness): your teammates' messages,
-  status and typing, inside Claude Code.
-- [**Company computer**](#company-computer): turns run in Leverage, so Claude
-  Code needs no model sign-in.
-- [**Steering**](#steering): Enter over a running turn steers it.
+- [**Multiplayer harness**](#multiplayer-harness): shared visibility of our
+  messages, status, typing indicators inside of Claude Code.
+- [**Company computer**](#company-computer): one session, two places. Turns run
+  in Leverage, so Claude Code needs no model sign-in. Text and thinking stream
+  as Leverage writes them.
+- [**Steering**](#steering): Enter over a running turn steers it. ctrl+x enter
+  keeps the prompt in Claude Code's queue, where you can edit it or take it
+  back, until its turn starts.
 - [**Governance**](#governance): approvals and questions show in Claude Code's
   own dialogs.
+
+## Recordings
 
 ### Multiplayer harness
 
 [![A teammate joins the session, types, and sends a prompt from Leverage](docs/teammates.gif)](docs/teammates.mp4)
 
-Shared visibility of our messages, status, typing indicators inside of Claude
-Code.
-
 ### Company computer
 
 [![Starting a session in a space and getting an answer](docs/first-session.gif)](docs/first-session.mp4)
-
-One session, two places. Turns run in Leverage, so Claude Code needs no model
-sign-in. Text and thinking stream as Leverage writes them.
 
 ### Steering
 
 [![Typing over a running turn: the agent skips the e2e tests and runs the type check instead](docs/steering.gif)](docs/steering.mp4)
 
-Enter over a running turn steers it. ctrl+x enter keeps the prompt in Claude
-Code's queue, where you can edit it or take it back, until its turn starts.
-
 ### Governance
 
 [![Approving a command in Claude Code's own dialog](docs/approvals.gif)](docs/approvals.mp4)
-
-Approvals and questions show in Claude Code's own dialogs.
 
 ### The Leverage pane
 
