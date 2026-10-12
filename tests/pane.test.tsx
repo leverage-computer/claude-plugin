@@ -44,7 +44,7 @@ const LAUNCHED = {
 function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 	const opened: string[] = [];
 	const read: string[] = [];
-	const histories: string[] = [];
+	const replays: string[] = [];
 	const queries: (string | null)[] = [];
 	const commands: string[] = [];
 	const tokens: string[] = [];
@@ -68,10 +68,6 @@ function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 		if (action === "read") {
 			read.push(id ?? "");
 			answer = { ok: true };
-		}
-		if (action === "history") {
-			histories.push(id ?? "");
-			answer = { messages: [], before: null };
 		}
 		// The turn starts a subagent in Leverage.
 		if (action === "step") {
@@ -99,6 +95,7 @@ function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 		}
 		// Grace has the session open in Codex, idle, and Ada types in the web app.
 		if (action === "prompts") {
+			if (url.searchParams.get("after") === "0") replays.push(id ?? "");
 			answer = {
 				prompts: [],
 				notices: [],
@@ -120,7 +117,7 @@ function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 	return {
 		opened,
 		read,
-		histories,
+		replays,
 		queries,
 		commands,
 		clock,
@@ -172,9 +169,10 @@ test("pressing another session moves the window to it", async ($, on) => {
 	await ui.press({ key: "s-s-2" });
 	expect(leverage.opened).toContain("s-2");
 	expect(leverage.commands).toContain("clear");
-	// Opened here, it reads as read, and its last turns show.
+	// Opened here, it reads as read, and its turns draw from its first row.
 	expect(leverage.read.at(-1)).toBe("s-2");
-	expect(leverage.histories.at(-1)).toBe("s-2");
+	await leverage.clock.advance(1500);
+	expect(leverage.replays.at(-1)).toBe("s-2");
 	// The pane marks the new session as the one here; the old one opens again.
 	await expect(ui.find({ key: "here-s-2" })).resolves.toBeDefined();
 	await expect(ui.find({ key: "s-s-1" })).resolves.toBeDefined();

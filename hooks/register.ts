@@ -17,6 +17,7 @@ import {
 	LEVERAGE_TOOLS,
 	leverageRequest,
 	MIRRORED,
+	replay,
 	space,
 } from "./client";
 import { registerCommands } from "./commands";
@@ -78,8 +79,20 @@ const usage = (context: number | null) => ({
 });
 /** The window's status line: the session's title, or its space. */
 let shown = "Leverage";
-/** The rows already shown as notices, by position. */
-const noticed = new Set<number>();
+/** The rows already shown as notices, by session and position. */
+const noticed = new Set<string>();
+/** A turn a session ran before this window opened it, to be drawn again. */
+type Replay = { session: string; text: string; steers: string[] };
+/** Replayed turns submitted to Claude Code's queue, oldest first, until each starts. */
+const replays: Replay[] = [];
+/** The replayed turn that runs, by its id. */
+let replaying: string | null = null;
+/** Turns of a session the window has since left, which draw nothing. */
+const stale = new Set<string>();
+/** Notices of rows the replay has yet to reach, oldest first. */
+const later: { session: string; seq: number; text: string }[] = [];
+/** The replay's prompt poll still runs, so no other one reads the same rows. */
+let isReading = false;
 /** The background commands still running, by task id. */
 const running = new Set<string>();
 /** The people the last prompt poll saw, as sent, so an unchanged room draws nothing. */
@@ -91,11 +104,25 @@ const waiting: { text: string; skills: { name: string }[]; pasted: boolean }[] =
 /** The subagents Claude Code is starting for Leverage, until each has its id. */
 const spawning = new Set<Promise<unknown>>();
 
-/** The status line: the session, and what runs in the background. */
+/** The status line: the session, its turns left to draw, and what runs in the background. */
 function line(): string {
-	return running.size > 0
-		? `${shown} · ${running.size} in the background`
-		: shown;
+	const left =
+		replays.filter((one) => one.session === here.id).length +
+		(replaying ? 1 : 0);
+	return [
+		shown,
+		...(left > 0 ? [`drawing ${left} earlier turn${left > 1 ? "s" : ""}`] : []),
+		...(running.size > 0 ? [`${running.size} in the background`] : []),
+	].join(" · ");
+}
+
+/** Whether the session's earlier turns are still to be read or drawn. */
+function isReplaying(): boolean {
+	return (
+		here.replay ||
+		replaying !== null ||
+		replays.some((one) => one.session === here.id)
+	);
 }
 const CHOICES = ["Once", "This session", "Always", "Reject"];
 const DECISIONS: Record<string, string> = {
@@ -166,21 +193,122 @@ async function askApprovals($: EngineInterface, waiting: Waiting) {
 	}
 }
 
-// Reads the session's last turns into one notice, so an opened window has context.
-async function showHistory($: EngineInterface) {
-	const { messages } = await call<{
-		messages: { author: string; text: string }[];
-	}>($, `/sessions/${here.id}/history`);
-	if (messages.length === 0) return;
-	const text = messages
-		.map((message) => `${message.author}: ${message.text}`)
-		.join("\n\n");
-	await $.session.append({
-		message: {
-			type: "system",
-			content: [{ type: "text", text: `Earlier in this session:\n\n${text}` }],
-		},
-	});
+/** A line in the transcript that the model never reads. */
+async function note($: EngineInterface, text: string) {
+	await $.session
+		.append({ message: { type: "system", content: [{ type: "text", text }] } })
+		.catch(() => {});
+}
+
+/** A Leverage prompt as this window shows it. */
+function framed(prompt: { author: string; text: string; images: number }) {
+	// Claude Code takes no image from a plugin, so the prompt says it has some.
+	const images =
+		prompt.images > 0
+			? ` [${prompt.images} image${prompt.images > 1 ? "s" : ""} in Leverage]`
+			: "";
+	return `${prompt.author} (in Leverage): ${prompt.text}${images}`;
+}
+
+/** Shows the notices of the rows the replay has drawn, up to `cursor`. */
+async function flush($: EngineInterface, cursor = Number.POSITIVE_INFINITY) {
+	while (later.length > 0 && later[0]!.seq <= cursor) {
+		const notice = later.shift()!;
+		if (notice.session === here.id) await note($, notice.text);
+	}
+}
+
+/** Once the session's earlier turns are all drawn, the notices left show. */
+async function settle($: EngineInterface) {
+	if (isReplaying()) return;
+	// A turn no prompt started has no turn here: the next prompt's reads past it.
+	here.cursor = Math.max(here.cursor, here.newest);
+	await flush($);
+	$.ui.status(line());
+}
+
+// Turns started from another client open a turn here, so both show it. A
+// window that opens a session reads it from its first row: each earlier
+// prompt starts a turn here, whose steps come from Leverage as a live turn's.
+async function poll($: EngineInterface) {
+	const id = here.id;
+	const isReplay = here.replay;
+	const { prompts, notices, last, viewers, typing } = await call<
+		{
+			prompts: {
+				uuid: string;
+				author: string;
+				text: string;
+				images: number;
+				steer: boolean;
+			}[];
+			notices: {
+				seq: number;
+				text: string;
+				task?: { id: string; running: boolean };
+			}[];
+			last: number;
+		} & Room
+	>($, `/sessions/${id}/prompts?after=${here.polled}`);
+	// The window moved to another session meanwhile.
+	if (here.id !== id) return;
+	here.replay = false;
+	here.polled = Math.max(here.polled, last);
+	// An older Leverage sends no room.
+	const room: Room = { viewers: viewers ?? [], typing: typing ?? [] };
+	if (JSON.stringify(room) !== seenRoom) {
+		seenRoom = JSON.stringify(room);
+		await update($, { plugin: "leverage", key: "people" }, () => room);
+	}
+	if (isReplay) {
+		running.clear();
+		later.length = 0;
+		await showLabel($);
+	}
+	// A row the window does not draw, as a compaction, shows as a notice.
+	// While earlier turns draw, it waits until the turns before it are drawn.
+	const isBehind = isReplay || isReplaying();
+	for (const notice of notices) {
+		const key = `${id}:${notice.seq}`;
+		if (noticed.has(key) && !isReplay) continue;
+		noticed.add(key);
+		if (notice.task?.running) running.add(notice.task.id);
+		else if (notice.task) running.delete(notice.task.id);
+		$.ui.status(line());
+		if (isBehind)
+			later.push({ session: id, seq: notice.seq, text: notice.text });
+		else await note($, notice.text);
+	}
+	later.sort((a, b) => a.seq - b.seq);
+	const turns: Replay[] = [];
+	for (const p of prompts) {
+		if (drawn.has(p.uuid) && !isReplay) continue;
+		drawn.add(p.uuid);
+		// A teammate's steer joins the running turn; Claude Code only shows it.
+		if (p.steer) {
+			const steer = `${p.author} (in Leverage) adds: ${p.text}`;
+			const turn = turns.at(-1);
+			if (isReplay && turn) turn.steers.push(steer);
+			else await note($, steer);
+			continue;
+		}
+		if (isReplay) {
+			turns.push({ session: id, text: framed(p), steers: [] });
+			continue;
+		}
+		await $.prompt.submit({ text: framed(p), asUser: true });
+	}
+	if (!isReplay) return;
+	// All queued at once, so a prompt typed meanwhile runs after them.
+	replays.push(...turns);
+	for (const turn of turns) {
+		void $.prompt.submit({ text: turn.text, asUser: true }).catch(async () => {
+			const at = replays.indexOf(turn);
+			if (at >= 0) replays.splice(at, 1);
+			await settle($);
+		});
+	}
+	await settle($);
 }
 
 // Sends a prompt of this window. The first one starts the session, named
@@ -209,12 +337,6 @@ async function send(
 	});
 	follow(started.id, started.cursor);
 	await showLabel($);
-}
-
-// Opens the session in this window: its history, and it reads as read.
-async function open($: EngineInterface) {
-	await call($, `/sessions/${here.id}/read`, {});
-	await showHistory($);
 }
 
 function localName(name: string): string {
@@ -416,91 +538,26 @@ export const register: Register = (on) => {
 			connectKept(await keptConfig($));
 		if (launched) {
 			for (const tool of LEVERAGE_TOOLS) await $.tool.register(tool);
-			// A window opened on a session starts at its newest row.
+			// A window opened on a session draws it from its first turn.
 			if (here.id) {
 				const opened = await call<{ id: string; cursor: number }>(
 					$,
 					`/sessions/${here.id}`,
 				);
-				follow(opened.id, opened.cursor);
-				await open($);
+				replay(opened.id, opened.cursor);
+				await call($, `/sessions/${here.id}/read`, {});
 			}
 			await showLabel($);
 		}
 		if (isReachable()) void $.ui.open({ id: PANE, title: "Leverage" });
-		// Turns started from another client open a turn here, so both show it.
 		// The poll runs from the start, so a later /leverage login needs no restart.
 		$.clock.every(1500, async () => {
-			if (!isClient() || !here.id) return;
-			const { prompts, notices, last, viewers, typing } = await call<
-				{
-					prompts: {
-						uuid: string;
-						author: string;
-						text: string;
-						images: number;
-						steer: boolean;
-					}[];
-					notices: {
-						seq: number;
-						text: string;
-						task?: { id: string; running: boolean };
-					}[];
-					last: number;
-				} & Room
-			>($, `/sessions/${here.id}/prompts?after=${here.polled}`);
-			here.polled = Math.max(here.polled, last);
-			// An older Leverage sends no room.
-			const room: Room = { viewers: viewers ?? [], typing: typing ?? [] };
-			if (JSON.stringify(room) !== seenRoom) {
-				seenRoom = JSON.stringify(room);
-				await update($, { plugin: "leverage", key: "people" }, () => room);
-			}
-			// A row the window does not draw, as a compaction, shows as a notice.
-			for (const notice of notices) {
-				if (noticed.has(notice.seq)) continue;
-				noticed.add(notice.seq);
-				if (notice.task?.running) running.add(notice.task.id);
-				else if (notice.task) running.delete(notice.task.id);
-				$.ui.status(line());
-				await $.session
-					.append({
-						message: {
-							type: "system",
-							content: [{ type: "text", text: notice.text }],
-						},
-					})
-					.catch(() => {});
-			}
-			for (const p of prompts) {
-				if (drawn.has(p.uuid)) continue;
-				drawn.add(p.uuid);
-				// A teammate's steer joins the running turn; Claude Code only shows it.
-				if (p.steer) {
-					await $.session
-						.append({
-							message: {
-								type: "system",
-								content: [
-									{
-										type: "text",
-										text: `${p.author} (in Leverage) adds: ${p.text}`,
-									},
-								],
-							},
-						})
-						.catch(() => {});
-					continue;
-				}
-				// Claude Code takes no image from a plugin, so the prompt says it has some.
-				const images =
-					p.images > 0
-						? ` [${p.images} image${p.images > 1 ? "s" : ""} in Leverage]`
-						: "";
-				await $.prompt.submit({
-					text: `${p.author} (in Leverage): ${p.text}${images}`,
-					asUser: true,
-				});
+			if (!isClient() || !here.id || isReading) return;
+			isReading = here.replay;
+			try {
+				await poll($);
+			} finally {
+				isReading = false;
 			}
 		});
 		return result;
@@ -525,6 +582,13 @@ export const register: Register = (on) => {
 		if (!person && !(e.origin.kind === "plugin" && here.skill)) {
 			return next(e);
 		}
+		// Until the session's earlier prompts are queued, this one would run first.
+		if (here.replay) {
+			void $.prompt.fill({ text: e.text }).catch(() => {});
+			return {
+				drop: "Leverage is still reading this session's earlier turns. Send it again in a moment.",
+			};
+		}
 		const skills = here.skill ? [{ name: here.skill }] : [];
 		here.skill = null;
 		// A sent prompt ends the typing the others see.
@@ -537,8 +601,9 @@ export const register: Register = (on) => {
 		const pasted =
 			e.attachments?.some((item) => item.type === "image") ?? false;
 		// Asked to wait (ctrl+x enter), it stays in Claude Code's queue, where it
-		// can be taken back, and goes to Leverage when its own turn starts.
-		if (e.turnId && e.wait) {
+		// can be taken back, and goes to Leverage when its own turn starts. So
+		// does one typed while the session's earlier turns draw, after them.
+		if ((e.turnId && e.wait) || isReplaying()) {
 			waiting.push({ text: e.text, skills, pasted });
 			return next(e);
 		}
@@ -553,8 +618,25 @@ export const register: Register = (on) => {
 
 	// A prompt that waited in Claude Code's queue goes when its turn starts.
 	on("turn.start", async ($, e, next) => {
+		// A replayed prompt's turn, oldest first: those queued before it never ran.
+		const replayed = isClient()
+			? replays.findIndex((one) => one.text === e.text)
+			: -1;
+		const turn = replays.splice(0, replayed + 1).at(-1);
+		// Queued for a session the window has since left, it draws nothing.
+		if (turn && turn.session !== here.id) stale.add(e.turnId);
+		else if (turn) replaying = e.turnId;
 		const result = await next(e);
 		if (!isClient()) return result;
+		if (stale.has(e.turnId)) {
+			await $.turn.abort({ turnId: e.turnId }).catch(() => {});
+			return result;
+		}
+		if (turn) {
+			$.ui.status(line());
+			for (const steer of turn.steers) await note($, steer);
+			return result;
+		}
 		const at = waiting.findIndex((one) => one.text === e.text);
 		if (at < 0) return result;
 		const [prompt] = waiting.splice(at, 1);
@@ -566,10 +648,16 @@ export const register: Register = (on) => {
 
 	// Esc here stops the turn in the sandbox too.
 	on("turn.complete", async ($, e, next) => {
+		if (stale.delete(e.turnId)) return next(e);
+		const replayed = !e.agentId && e.turnId === replaying;
+		if (replayed) replaying = null;
 		if (isClient() && here.id && e.reason === "aborted") {
 			here.skip = here.turnId;
-			await call($, `/sessions/${here.id}/stop`, {});
+			// A replayed turn ran long ago; only the session's last may run still.
+			if (!replayed || !isReplaying())
+				await call($, `/sessions/${here.id}/stop`, {});
 		}
+		if (replayed) await settle($);
 		return next(e);
 	});
 
@@ -624,6 +712,18 @@ export const register: Register = (on) => {
 
 	on("turn.step", async function* ($, e, next) {
 		if (!isClient()) return yield* next(e);
+		// Another session's replayed turn reads none of this one's rows.
+		if (stale.has(e.turnId)) {
+			yield { kind: "stop", stopReason: "end_turn", usage: usage(null) };
+			return {
+				turnId: e.turnId,
+				index: e.index,
+				answer: "",
+				toolUses: [],
+				stopReason: "end_turn",
+				usage: usage(null),
+			};
+		}
 		// A subagent's first step can come before its spawn names it.
 		if (e.agentId && !here.loops.has(e.agentId))
 			await Promise.allSettled([...spawning]);
@@ -678,6 +778,8 @@ export const register: Register = (on) => {
 			here.cursor = step.cursor;
 			here.turnId = step.turnId;
 			here.question = step.question;
+			// A replay's notices show once it reaches their rows.
+			await flush($, step.cursor);
 			// A first turn names the session.
 			if (step.stop === "end_turn") void showLabel($);
 		}
