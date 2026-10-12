@@ -5,14 +5,62 @@
 <a href=".claude-plugin/plugin.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fleverage-computer%2Fclaude-plugin%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=Version&labelColor=0a0a0a&color=3f3f46" alt="Plugin version"></a>
 <a href="#requirements"><img src="https://img.shields.io/badge/Claude%20Code-%E2%89%A52.1.286-3f3f46?labelColor=0a0a0a" alt="Claude Code 2.1.286 or later"></a>
 
-[Install](#install) · [Usage](#usage) ·
-[Features](#features) · [leverage.computer](https://leverage.computer)
+[Features](#features) · [Install](#install) · [Usage](#usage) ·
+[leverage.computer](https://leverage.computer)
 
 [![Setting up Leverage in Claude Code: add the marketplace, install the plugin, open a session from /leverage, and prompt it](docs/setup.gif)](docs/setup.mp4)
 
+## Features
+
+- [**Multiplayer harness**](#multiplayer-harness): your teammates' messages,
+  status and typing, inside Claude Code.
+- [**Company computer**](#company-computer): turns run in Leverage, so Claude
+  Code needs no model sign-in.
+- [**Steering**](#steering): Enter over a running turn steers it.
+- [**Governance**](#governance): approvals and questions show in Claude Code's
+  own dialogs.
+
+### Multiplayer harness
+
+[![A teammate joins the session, types, and sends a prompt from Leverage](docs/teammates.gif)](docs/teammates.mp4)
+
+Shared visibility of our messages, status, typing indicators inside of Claude
+Code.
+
+### Company computer
+
+[![Starting a session in a space and getting an answer](docs/first-session.gif)](docs/first-session.mp4)
+
+One session, two places. Turns run in Leverage, so Claude Code needs no model
+sign-in. Text and thinking stream as Leverage writes them.
+
+### Steering
+
+[![Typing over a running turn: the agent skips the e2e tests and runs the type check instead](docs/steering.gif)](docs/steering.mp4)
+
+Enter over a running turn steers it. ctrl+x enter keeps the prompt in Claude
+Code's queue, where you can edit it or take it back, until its turn starts.
+
+### Governance
+
+[![Approving a command in Claude Code's own dialog](docs/approvals.gif)](docs/approvals.mp4)
+
+Approvals and questions show in Claude Code's own dialogs.
+
+### The Leverage pane
+
+[![Opening the pane, jumping to a session with its whole history, and working in it](docs/sessions.gif)](docs/sessions.mp4)
+
+The pane lists your spaces, their sessions. A session you open shows its whole
+history: prompts, text, tool calls and results. `/leverage` opens the pane
+again.
+
+### Also
+
+- **Subagents** run Leverage subagents as Claude Code's own agents.
+- **`/leverage help`** lists the actions you can do with Leverage mod.
 
 ## Install
-
 
 ### Requirements
 
@@ -47,34 +95,6 @@ To start a new session in a space, use the Leverage CLI:
 ```sh
 leverage claude <space>
 ```
-
-## Features
-
-- **One session, two places.** Text and thinking stream as Leverage writes
-  them.
-
-  [![Starting a session in a space and getting an answer](docs/first-session.gif)](docs/first-session.mp4)
-
-- **Teammates.** Shared visibility of our messages, status, typing indicators
-  inside of Claude Code.
-
-  [![A teammate joins the session, types, and sends a prompt from Leverage](docs/teammates.gif)](docs/teammates.mp4)
-
-- **Steering.** Enter over a running turn steers it. ctrl+x enter keeps the
-  prompt in Claude Code's queue, where you can edit it or take it back, until
-  its turn starts.
-- **Approvals and questions** show in Claude Code's own dialogs.
-
-  [![Approving a command in Claude Code's own dialog](docs/approvals.gif)](docs/approvals.mp4)
-
-- **Subagents** run Leverage subagents as Claude Code's own agents.
-- **The Leverage pane** lists your spaces, their sessions. A session you
-  open shows its whole history: prompts, text, tool calls and results.
-  `/leverage` opens the pane again.
-
-  [![Opening the pane, jumping to a session with its whole history, and working in it](docs/sessions.gif)](docs/sessions.mp4)
-
-- **`/leverage help`** lists the actions you can do with Leverage mod.
 
 ## License
 
