@@ -4,12 +4,12 @@ import { atom, read, update } from "claude-code";
 import type { PaneSession, WorkspaceTree } from "../types";
 import {
 	becomeClient,
-	follow,
 	here,
 	isClient,
 	isReachable,
 	LEVERAGE_TOOLS,
 	leverageRequest,
+	replay,
 } from "./client";
 
 // The Leverage pane, drawn as Claude's session sidebar: the workspace's
@@ -97,12 +97,10 @@ export function registerPane(on: On) {
 
 		const attach = async (session: PaneSession) => {
 			if (session.id === data.attached) return;
-			// The window starts at the session's newest row.
 			const opened = await call<{ id: string; cursor: number }>(
 				$,
 				`/sessions/${session.id}`,
 			);
-			follow(opened.id, opened.cursor);
 			// From here the window runs the session's turns in Leverage.
 			if (!isClient()) {
 				for (const tool of LEVERAGE_TOOLS) await $.tool.register(tool);
@@ -110,25 +108,11 @@ export function registerPane(on: On) {
 			}
 			// One window mirrors one session, so the old transcript goes.
 			await $.command.run({ command: "clear" });
+			// The window draws the session from its first turn, as Leverage shows it.
+			replay(opened.id, opened.cursor);
 			$.ui.status(session.title);
-			// Opened, it reads as read, and its last turns show as one notice.
+			// Opened, it reads as read.
 			await call($, `/sessions/${session.id}/read`, {});
-			const { messages } = await call<{
-				messages: { author: string; text: string }[];
-			}>($, `/sessions/${session.id}/history`);
-			if (messages.length > 0) {
-				const text = messages
-					.map((message) => `${message.author}: ${message.text}`)
-					.join("\n\n");
-				await $.session.append({
-					message: {
-						type: "system",
-						content: [
-							{ type: "text", text: `Earlier in this session:\n\n${text}` },
-						],
-					},
-				});
-			}
 			await refresh($);
 		};
 

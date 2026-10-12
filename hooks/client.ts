@@ -42,6 +42,10 @@ export const here = {
 	agents: new Map<string, Subagent>(),
 	/** The same subagents, by the Claude Code agent that runs each. */
 	loops: new Map<string, Subagent>(),
+	/** The session's turns so far are still to be drawn, from its first row. */
+	replay: false,
+	/** The session's newest row when the window opened it, where a replay ends. */
+	newest: 0,
 };
 
 /** A Leverage subagent that Claude Code runs as its own agent. */
@@ -246,6 +250,18 @@ export function follow(id: string, cursor: number) {
 	here.typedAt = 0;
 	here.agents.clear();
 	here.loops.clear();
+	here.replay = false;
+	here.newest = cursor;
+}
+
+/**
+ * Moves this window to a session from its first row, so its turns so far draw
+ * again as this window's own: prompts, text, thinking, tool calls and results.
+ */
+export function replay(id: string, newest: number) {
+	follow(id, 0);
+	here.replay = true;
+	here.newest = newest;
 }
 
 export function leverageRequest(
