@@ -56,10 +56,11 @@ leverage claude <space>
   [![Approving a command in Claude Code's own dialog](docs/approvals.gif)](docs/approvals.mp4)
 
 - **Subagents** run Leverage subagents as Claude Code's own agents.
-- **The Leverage pane** lists your spaces, their sessions.
+- **The Leverage pane** lists your spaces, their sessions. A session you
+  open shows its whole history: prompts, text, tool calls and results.
   `/leverage` opens the pane again.
 
-  [![Opening the pane, jumping to a session, and working in it](docs/sessions.gif)](docs/sessions.mp4)
+  [![Opening the pane, jumping to a session with its whole history, and working in it](docs/sessions.gif)](docs/sessions.mp4)
 
 - **`/leverage help`** lists the actions you can do with Leverage mod.
 
