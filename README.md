@@ -24,6 +24,18 @@ claude plugin marketplace add leverage-computer/claude-plugin
 claude plugin install leverage@leverage
 ```
 
+### Claude Desktop
+
+Claude Desktop's Code tab runs Claude Code, so the plugin works there too.
+Add it from Claude Desktop's plugin directory:
+
+1. Open Customize → Plugins and click Discover.
+2. Click +, then Add from a repository.
+3. Enter `leverage-computer/claude-plugin` and click Sync.
+4. Open Leverage and click Install.
+
+[![Setting up Leverage in Claude Desktop: add the marketplace from its plugin directory, install the plugin, sign in with /leverage login, and open a session from the pane](docs/claude-desktop.gif)](docs/claude-desktop.mp4)
+
 ## Usage
 
 - `/leverage login`: sign in, and approve in the browser.
