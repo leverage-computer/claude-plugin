@@ -1,7 +1,7 @@
 // How much of hooks/ the tests run. `claude plugin test` measures none, and
 // the hooks run where no coverage tool sees them, so this tests a copy of
-// the plugin whose hooks count what runs, and whose tests read the counts
-// back through a command when each ends.
+// the plugin whose hooks count what runs, and whose tests print the counts
+// when each ends.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -16,34 +16,26 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { transformSync } from "@babel/core";
-import libCoverage, { type FileCoverageData } from "istanbul-lib-coverage";
+import libCoverage from "istanbul-lib-coverage";
 import libReport from "istanbul-lib-report";
 import reporters from "istanbul-reports";
 
-type Counts = Record<string, Pick<FileCoverageData, "s" | "f" | "b">>;
-
 const root = join(import.meta.dirname, "..");
 const copy = mkdtempSync(join(tmpdir(), "leverage-coverage-"));
-const MARK = "__coverage__ ";
-/** What makes a state value, which the engine reads in the source. */
-const STATE = new Set(["atom", "derive", "memberOf"]);
 
-/** Each hooks file, as it was before any test ran. */
-const files: Record<string, FileCoverageData> = {};
+for (const dir of [".claude-plugin", "hooks", "types"])
+	cpSync(join(root, dir), join(copy, dir), { recursive: true });
 
-mkdirSync(join(copy, ".claude-plugin"));
-cpSync(
-	join(root, ".claude-plugin/plugin.json"),
-	join(copy, ".claude-plugin/plugin.json"),
-);
-cpSync(join(root, "types"), join(copy, "types"), { recursive: true });
-mkdirSync(join(copy, "hooks"));
 for (const name of readdirSync(join(root, "hooks"))) {
-	const source = join(root, "hooks", name);
 	if (!/\.tsx?$/.test(name)) continue;
-	const out = transformSync(readFileSync(source, "utf8"), {
-		filename: source,
-		cwd: root,
+	const filename = join(root, "hooks", name);
+	// The engine reads each state value as `const x = atom(...)`, uncounted.
+	const source = readFileSync(filename, "utf8").replace(
+		/^(export )?const \w+ = (atom|derive|memberOf)\(/gm,
+		"/* istanbul ignore next */ $&",
+	);
+	const out = transformSync(source, {
+		filename,
 		babelrc: false,
 		configFile: false,
 		presets: [
@@ -53,24 +45,6 @@ for (const name of readdirSync(join(root, "hooks"))) {
 			],
 		],
 		plugins: [
-			// The engine finds each state atom as `const x = atom(...)`.
-			() => ({
-				visitor: {
-					Program(program) {
-						program.traverse({
-							VariableDeclaration(path) {
-								const init = path.node.declarations[0]?.init;
-								if (
-									init?.type === "CallExpression" &&
-									init.callee.type === "Identifier" &&
-									STATE.has(init.callee.name)
-								)
-									path.addComment("leading", " istanbul ignore next ");
-							},
-						});
-					},
-				},
-			}),
 			[
 				"istanbul",
 				{
@@ -78,15 +52,13 @@ for (const name of readdirSync(join(root, "hooks"))) {
 					coverageGlobalScope: "globalThis",
 					coverageGlobalScopeFunc: false,
 					useInlineSourceMaps: false,
-					onCover: (path: string, data: FileCoverageData) => {
-						files[path] = data;
-					},
 				},
 			],
 		],
 	});
 	writeFileSync(join(copy, "hooks", name), out?.code ?? "");
 }
+
 // The copy's hooks hand a test the counts when it asks.
 writeFileSync(
 	join(copy, "hooks/hooks.json"),
@@ -96,25 +68,17 @@ writeFileSync(
 	join(copy, "hooks/coverage.ts"),
 	`import { register as plugin } from "./register";
 export const register = (on, options) => {
-	on("command.run", { command: "__coverage" }, () => {
-		const all = globalThis.__coverage__ ?? {};
-		const counts = {};
-		for (const [path, { s, f, b }] of Object.entries(all)) counts[path] = { s, f, b };
-		return { text: JSON.stringify(counts) };
-	});
+	on("command.run", { command: "__coverage" }, () => ({
+		text: JSON.stringify(globalThis.__coverage__),
+	}));
 	return plugin(on, options);
 };
 `,
 );
-// The copy's tests print the counts as each ends.
+
+// The copy's tests print the counts as each ends, in lines of 32 KB: one
+// past 64 KB reaches the output cut in two.
 mkdirSync(join(copy, "tests"));
-for (const name of readdirSync(join(root, "tests"))) {
-	const test = readFileSync(join(root, "tests", name), "utf8");
-	writeFileSync(
-		join(copy, "tests", name),
-		test.replaceAll('"claude-code/testing"', '"./kit"'),
-	);
-}
 writeFileSync(
 	join(copy, "tests/kit.ts"),
 	`import { test as kitTest } from "claude-code/testing";
@@ -126,38 +90,39 @@ export const test = (name, ...rest) => {
 			await body($, on);
 		} finally {
 			const { text } = await $.command.run({ command: "__coverage", args: "" });
-			console.log(${JSON.stringify(MARK)} + text);
+			const id = Math.random().toString(36).slice(2);
+			for (let at = 0; at < text.length; at += 32768)
+				console.log("__coverage__", id, text.slice(at, at + 32768));
 		}
 	});
 };
 `,
 );
 
-const run = spawnSync("claude", ["plugin", "test", copy], {
-	encoding: "utf8",
-	maxBuffer: 1 << 30,
-});
-rmSync(copy, { recursive: true, force: true });
-const output = `${run.stdout}\n${run.stderr}`;
-if (run.status !== 0) {
-	process.stdout.write(output);
-	process.exit(run.status ?? 1);
-}
-
+// One test file at a time: files tested side by side print to one pipe,
+// where their long lines interleave.
 const total = libCoverage.createCoverageMap({});
-for (const file of Object.values(files)) total.addFileCoverage(file);
-const reports = output.split("\n").filter((line) => line.startsWith(MARK));
-if (reports.length === 0) {
-	process.stdout.write(output);
-	throw new Error("no test reported what it ran");
-}
-for (const line of reports) {
-	const counts = JSON.parse(line.slice(MARK.length)) as Counts;
-	for (const [path, count] of Object.entries(counts)) {
-		const file = files[path];
-		if (file) total.merge({ [path]: { ...file, ...count } });
+for (const name of readdirSync(join(root, "tests"))) {
+	const test = readFileSync(join(root, "tests", name), "utf8");
+	const path = join(copy, "tests", name);
+	writeFileSync(path, test.replaceAll('"claude-code/testing"', '"./kit"'));
+	const run = spawnSync("claude", ["plugin", "test", copy], {
+		encoding: "utf8",
+		maxBuffer: 1 << 30,
+	});
+	rmSync(path);
+	const output = `${run.stdout}\n${run.stderr}`;
+	/** Each test's counts, by the id it printed them under. */
+	const counts = new Map<string, string>();
+	for (const [, id, part] of output.matchAll(/^__coverage__ (\S+) (.*)$/gm))
+		counts.set(id, (counts.get(id) ?? "") + part);
+	if (run.status !== 0 || counts.size === 0) {
+		process.stdout.write(output);
+		process.exit(run.status || 1);
 	}
+	for (const text of counts.values()) total.merge(JSON.parse(text));
 }
+rmSync(copy, { recursive: true, force: true });
 
 const context = libReport.createContext({
 	dir: join(root, "coverage"),
