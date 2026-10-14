@@ -3,3 +3,5 @@ node_modules/
 *.log
 .claude/
 coverage/
+.direnv/
+.pre-commit-config.yaml
