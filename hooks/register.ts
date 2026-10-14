@@ -1,4 +1,4 @@
-import type { EngineInterface, Register } from "claude-code";
+import type { EngineInterface, HookFailure, Register } from "claude-code";
 import { update } from "claude-code";
 
 import type { Room, WorkspaceTree } from "../types";
@@ -495,6 +495,12 @@ function nativeResult(
 	return content;
 }
 
+/** Why a hook failed, as the line its `.catch` answers with says it. */
+function why(error: HookFailure): string {
+	if (error.message) return error.message;
+	return error.kind === "timeout" ? "no answer in time" : "no answer";
+}
+
 /** The token `/leverage login` keeps in Claude Code's config; or "{}". */
 async function savedAccess($: EngineInterface): Promise<string> {
 	const file = accessPath(
@@ -614,6 +620,11 @@ export const register: Register = (on) => {
 		const images = pasted && !steer ? await lastImages($) : [];
 		await send($, { text: e.text, images, skills, steer });
 		return result ?? next(e);
+	}).catch(async ($, e, next) => {
+		if (next.called || !isClient()) return next(e);
+		// Sent nowhere, the prompt would start a turn that waits on Leverage.
+		void $.prompt.fill({ text: e.text }).catch(() => {});
+		return { drop: `Not sent to Leverage: ${why(next.error)}` };
 	});
 
 	// A prompt that waited in Claude Code's queue goes when its turn starts.
@@ -669,7 +680,12 @@ export const register: Register = (on) => {
 		}
 		await call($, `/sessions/${here.id}/compact`, {});
 		return { skip: "Leverage is compacting this session." };
-	});
+	}).catch(async ($, e, next) =>
+		// Compacted here, the window's copy would call a model of its own.
+		next.called || !isClient()
+			? next(e)
+			: { skip: `Leverage did not compact this session: ${why(next.error)}` },
+	);
 
 	// One window shows one Leverage session, so these act on Leverage.
 	on("command.run", { command: "rename" }, async ($, e, next) => {
@@ -679,12 +695,15 @@ export const register: Register = (on) => {
 		await call($, `/sessions/${here.id}/rename`, { title });
 		await showLabel($);
 		return { text: `Renamed the Leverage session to ${title}.` };
-	});
-	on("command.run", { command: "resume" }, ($, e, next) =>
-		isClient()
-			? { text: "/leverage opens another Leverage session in this window." }
-			: next(e),
+	}).catch(async ($, e, next) =>
+		next.called || !isClient() || !here.id
+			? next(e)
+			: { text: `Leverage did not rename the session: ${why(next.error)}` },
 	);
+	const resume = "/leverage opens another Leverage session in this window.";
+	on("command.run", { command: "resume" }, ($, e, next) =>
+		isClient() ? { text: resume } : next(e),
+	).catch(async ($, e, next) => (isClient() ? { text: resume } : next(e)));
 
 	// Claude Code runs a Leverage subagent as its own agent. Its steps come
 	// from the subagent's rows in Leverage.
@@ -701,14 +720,20 @@ export const register: Register = (on) => {
 		} finally {
 			spawning.delete(started);
 		}
-	});
+	}).catch(async ($, e, next) =>
+		// Started without its rows, a subagent's steps would call a model here.
+		next.called || !isClient() || !here.agents.has(e.tool_use_id)
+			? next(e)
+			: { deny: `Leverage's subagent did not start here: ${why(next.error)}` },
+	);
 
 	// Leverage ran the subagent already, so Claude Code asks nobody about it.
+	// Failed, the check is Claude Code's own, which asks.
 	on("tool.check", { tool: "Agent" }, ($, e, next) =>
 		isClient() && here.agents.has(e.tool_use_id ?? "")
 			? { decision: "allow" }
 			: next(e),
-	);
+	).catch(($, e, next) => next(e));
 
 	on("turn.step", async function* ($, e, next) {
 		if (!isClient()) return yield* next(e);
@@ -921,5 +946,14 @@ export const register: Register = (on) => {
 			? nativeResult(String(tool), input, result.content, startLine)
 			: result.content;
 		return { result: shaped as never };
+	}).catch(async ($, e, next) => {
+		const id = e.tool_use_id ?? "";
+		const isLeverage =
+			e.tool.startsWith("mcp__leverage__") ||
+			(here.calls.has(id) && !here.agents.has(id));
+		// Leverage's call never runs here, whatever failed.
+		if (next.called || !isLeverage) return next(e);
+		const reason = why(next.error);
+		return { deny: `Leverage did not return this call's result: ${reason}` };
 	});
 };
