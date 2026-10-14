@@ -76,6 +76,17 @@ leverage claude <space>
 
 - **`/leverage help`** lists the actions you can do with Leverage mod.
 
+## Development
+
+[Nix](https://nixos.org) gives the shell Node and pnpm: `nix develop`, or
+`direnv allow` once. Then:
+
+```sh
+pnpm install   # Claude Code 2.1.286, the oldest it supports, included
+pnpm test      # claude plugin test .
+pnpm coverage  # how much of hooks/ the tests run
+```
+
 ## License
 
 [MIT](LICENSE)

@@ -1,10 +1,14 @@
 {
 	"private": true,
 	"type": "module",
+	"packageManager": "pnpm@12.9.0",
 	"scripts": {
+		"validate": "claude plugin validate .",
+		"test": "claude plugin test .",
 		"coverage": "node scripts/coverage.ts"
 	},
 	"devDependencies": {
+		"@anthropic-ai/claude-code": "2.1.286",
 		"@babel/core": "^7.29.7",
 		"@babel/preset-typescript": "^7.29.7",
 		"babel-plugin-istanbul": "^8.0.0",
