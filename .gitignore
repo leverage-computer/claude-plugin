@@ -4,3 +4,4 @@ node_modules/
 .claude/
 coverage/
 .direnv/
+.pre-commit-config.yaml

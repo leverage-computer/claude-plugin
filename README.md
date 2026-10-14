@@ -78,8 +78,8 @@ leverage claude <space>
 
 ## Development
 
-[Nix](https://nixos.org) gives the shell Node and pnpm: `nix develop`, or
-`direnv allow` once. Then:
+[Nix](https://nixos.org) gives the shell Node and pnpm, and lints each
+commit with Biome and nixfmt: `nix develop`, or `direnv allow` once. Then:
 
 ```sh
 pnpm install   # Claude Code 2.1.286, the oldest it supports, included
