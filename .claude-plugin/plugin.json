@@ -1,9 +1,9 @@
 {
 	"name": "leverage",
-	"version": "0.16.0",
+	"version": "0.1.0",
 	"description": "Runs this Claude Code session as a client of a Leverage session",
 	"author": { "name": "Leverage Computer" },
-	"repository": "https://github.com/thepresciencecompany/claude",
+	"repository": "https://github.com/leverage-computer/claude-plugin",
 	"license": "MIT",
 	"types": "./types/index.d.ts"
 }
