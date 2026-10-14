@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,6 +27,12 @@ jobs:
       - run: npm ci
       - name: Coverage
         run: |
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          npm run -s coverage | tee -a "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          { echo '### Coverage'; echo '```'; npm run -s coverage; echo '```'; } |
+            tee "$RUNNER_TEMP/coverage.md"
+          cat "$RUNNER_TEMP/coverage.md" >> "$GITHUB_STEP_SUMMARY"
+      # One comment per PR, updated on each push. A fork's token cannot comment.
+      - name: Comment coverage on the PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file "$RUNNER_TEMP/coverage.md" --edit-last --create-if-none
