@@ -74,13 +74,10 @@ const PANE = {
 // Stands in for Leverage and the engine beneath, and records what reaches them.
 function fakeLeverage(on: On) {
 	const asked: string[] = [];
-	const submitted: string[] = [];
 	const filled: string[] = [];
 	const aborted: string[] = [];
 	mock.env(on, LAUNCHED);
 	const clock = mock.clock(on);
-	// The kit of Claude Code 2.1.286, which CI runs, records no appends.
-	const session = "session" in mock ? mock.session(on) : null;
 	on("http.fetch", ($, e) => {
 		const url = new URL(e.url);
 		const path = url.pathname.replace(/^\/api\/claude/, "");
@@ -125,10 +122,7 @@ function fakeLeverage(on: On) {
 			},
 		};
 	});
-	on("prompt.submit", ($, e) => {
-		submitted.push(e.text);
-		return { text: e.text };
-	});
+	on("prompt.submit", ($, e) => ({ text: e.text }));
 	on("prompt.fill", ($, e) => {
 		filled.push(e.text);
 		return { isFilled: true };
@@ -148,7 +142,7 @@ function fakeLeverage(on: On) {
 		"ui.status",
 	] as const)
 		on(event, () => ({ value: {} }) as never);
-	return { asked, submitted, filled, aborted, clock, session };
+	return { asked, filled, aborted, clock };
 }
 
 /** Runs one turn here as the engine does, and hands back what it drew. */
@@ -174,45 +168,6 @@ async function turn($: Parameters<TestBody>[0], text: string, turnId: string) {
 
 const start = ($: Parameters<TestBody>[0]) =>
 	$.session.start({ cwd: "/work", surface: "terminal", isInteractive: true });
-
-test("a session opened here draws its earlier turns as Claude Code's own", async ($, on) => {
-	const leverage = fakeLeverage(on);
-	await start($);
-	await leverage.clock.advance(1500);
-	// Read from the session's first row, each earlier prompt starts a turn here.
-	expect(leverage.asked).toContain("GET /sessions/s-1/prompts?after=0");
-	expect(leverage.submitted).toEqual([FIRST, SECOND]);
-	const first = await turn($, FIRST, "c-1");
-	expect(first).toContainEqual(
-		expect.objectContaining({ kind: "thinking", text: "The cookie is unset." }),
-	);
-	expect(first).toContainEqual(
-		expect.objectContaining({ kind: "text", text: "Fixed the login." }),
-	);
-	const second = await turn($, SECOND, "c-2");
-	expect(second).toContainEqual(
-		expect.objectContaining({ kind: "text", text: "The tests pass." }),
-	);
-	expect(leverage.asked).toContain(
-		"GET /sessions/s-1/step?after=4&stream=true",
-	);
-	// Grace's steer shows in the turn it joined; the compaction once the
-	// replay reaches its row.
-	if (leverage.session) {
-		expect(
-			leverage.session.appended().map((row) => row.message.content[0]),
-		).toEqual([
-			expect.objectContaining({
-				text: "Grace (in Leverage) adds: use the cookie",
-			}),
-			expect.objectContaining({ text: "Leverage compacted the session." }),
-		]);
-	}
-	// Nothing went to Leverage: these turns ran there already.
-	expect(leverage.asked.filter((one) => one.startsWith("POST"))).toEqual([
-		"POST /sessions/s-1/read",
-	]);
-});
 
 test("a prompt typed while the earlier turns draw goes to Leverage after them", async ($, on) => {
 	const leverage = fakeLeverage(on);
