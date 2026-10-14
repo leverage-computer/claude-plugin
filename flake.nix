@@ -43,6 +43,8 @@
             packages = [
               pkgs.nodejs_24
               pkgs.pnpm
+              # Zed's language server for flake.nix.
+              pkgs.nil
             ]
             ++ self.checks.${system}.pre-commit.enabledPackages;
           };
