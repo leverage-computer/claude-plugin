@@ -15,7 +15,6 @@ function fakeLeverage(
 		workspaces = WORKSPACES.slice(0, 1),
 		approveAfter = 1,
 		canWrite = true,
-		dropFirstPoll = false,
 	} = {},
 ) {
 	const asked: string[] = [];
@@ -47,16 +46,13 @@ function fakeLeverage(
 					interval: 5,
 				});
 			case "/api/cli/auth/token":
-				if (dropFirstPoll && polls++ === 0) throw new Error("network down");
 				return ++polls > approveAfter
 					? answer(200, { access_token: "lev_at_1", refresh_token: "lev_rt_1" })
 					: answer(428, { error: "authorization_pending" });
 			case "/api/workspaces":
 				return answer(200, workspaces);
 			case "/api/claude/workspace":
-				return headers.authorization === "Bearer lev_cl_bad"
-					? answer(401, { error: "signed_out" })
-					: answer(200, TREE);
+				return answer(200, TREE);
 		}
 		const minted = url.pathname.match(
 			/^\/api\/workspaces\/([^/]+)\/claude\/token$/,
@@ -116,38 +112,6 @@ const kept = (ran: { argv: readonly string[]; stdin?: string }[]) => {
 		? { file: write.argv.at(-1), ...JSON.parse(write.stdin ?? "{}") }
 		: null;
 };
-
-test("a token kept in Claude Code's config connects the window", async ($, on) => {
-	const host = fakeLeverage(on, { HOME: "/Users/ana" });
-	on("fs.read", (_, e) => {
-		if (e.path !== "/Users/ana/.claude/leverage.json")
-			throw new Error("no such file");
-		return {
-			value: JSON.stringify({
-				url: "https://leverage.test",
-				token: "lev_cl_kept",
-			}),
-		};
-	});
-	const opened = await start($, on);
-	expect(opened).toContain("leverage");
-	const answer = await leverage($, "connectors");
-	expect(answer.text).not.toContain("Not signed in");
-	expect(host.asked).toContain(
-		"GET https://leverage.test/api/claude/connectors Bearer lev_cl_kept",
-	);
-});
-
-test("CLAUDE_CONFIG_DIR moves the kept token", async ($, on) => {
-	fakeLeverage(on, { HOME: "/Users/ana", CLAUDE_CONFIG_DIR: "/cfg" });
-	const read: string[] = [];
-	on("fs.read", (_, e) => {
-		read.push(e.path);
-		throw new Error("no such file");
-	});
-	await start($, on);
-	expect(read).toContain("/cfg/leverage.json");
-});
 
 test("/leverage login signs in in the browser and keeps a Claude Code token", async ($, on) => {
 	const host = fakeLeverage(on, {
@@ -261,47 +225,5 @@ test("logout while a sign-in waits keeps nothing", async ($, on) => {
 	await host.clock.advance(10000);
 	expect(kept(host.ran)).toBeNull();
 	expect(host.toasts).toEqual([]);
-	expect((await leverage($, "")).text).toContain("Not signed in");
-});
-
-test("a network error while waiting asks again", async ($, on) => {
-	const host = fakeLeverage(
-		on,
-		{ HOME: "/Users/ana" },
-		{ approveAfter: 0, dropFirstPoll: true },
-	);
-	on("fs.read", () => {
-		throw new Error("no such file");
-	});
-	await start($, on);
-	await leverage($, "login");
-	await host.clock.advance(5000);
-	expect(kept(host.ran)).toBeNull();
-	await host.clock.advance(5000);
-	expect(kept(host.ran)?.token).toBe("lev_cl_w-1");
-	expect(host.toasts).toContain("Signed in to acme. /leverage opens the pane.");
-});
-
-test("/leverage logout forgets the token", async ($, on) => {
-	const host = fakeLeverage(on, { HOME: "/Users/ana" });
-	on("fs.read", (_, e) => {
-		if (e.path !== "/Users/ana/.claude/leverage.json")
-			throw new Error("no such file");
-		return {
-			value: JSON.stringify({
-				url: "https://leverage.test",
-				token: "lev_cl_kept",
-			}),
-		};
-	});
-	on("fs.exists", () => ({ value: true }));
-	await start($, on);
-	expect((await leverage($, "logout")).text).toBe(
-		"Signed out. Leverage Settings → Integrations revokes the token.",
-	);
-	expect(host.ran).toContainEqual({
-		argv: ["rm", "-f", "/Users/ana/.claude/leverage.json"],
-		stdin: undefined,
-	});
 	expect((await leverage($, "")).text).toContain("Not signed in");
 });

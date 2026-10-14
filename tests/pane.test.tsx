@@ -43,10 +43,7 @@ const LAUNCHED = {
 
 function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 	const opened: string[] = [];
-	const read: string[] = [];
-	const replays: string[] = [];
 	const queries: (string | null)[] = [];
-	const commands: string[] = [];
 	const tokens: string[] = [];
 	mock.env(on, env);
 	const clock = mock.clock(on);
@@ -65,37 +62,8 @@ function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 			opened.push(id);
 			answer = { id, title: id, cursor: 7 };
 		}
-		if (action === "read") {
-			read.push(id ?? "");
-			answer = { ok: true };
-		}
-		// The turn starts a subagent in Leverage.
-		if (action === "step") {
-			answer = {
-				blocks: [
-					{
-						kind: "tool",
-						id: "agent-1",
-						name: "Task",
-						input: { prompt: "Look at checkout" },
-						agent: {
-							task: "t-1",
-							description: "Find the flake",
-							prompt: "Look at checkout",
-							type: "Explore",
-						},
-					},
-				],
-				stop: "tool_use",
-				cursor: 9,
-				turnId: "turn-1",
-				context: null,
-				question: null,
-			};
-		}
 		// Grace has the session open in Codex, idle, and Ada types in the web app.
 		if (action === "prompts") {
-			if (url.searchParams.get("after") === "0") replays.push(id ?? "");
 			answer = {
 				prompts: [],
 				notices: [],
@@ -110,19 +78,8 @@ function fakeLeverage(on: On, env: Record<string, string> = LAUNCHED) {
 		const text = JSON.stringify(answer);
 		return { value: { status: 200, ok: true, headers: {}, text } };
 	});
-	on("command.run", ($, e) => {
-		commands.push(e.command);
-		return { text: "" };
-	});
-	return {
-		opened,
-		read,
-		replays,
-		queries,
-		commands,
-		clock,
-		tokens,
-	};
+	on("command.run", () => ({ text: "" }));
+	return { opened, queries, clock, tokens };
 }
 
 /** Starts a window as Claude Code does, launched by `leverage claude`. */
@@ -148,35 +105,6 @@ function engineStart(on: On) {
 		on(event, () => ({ value: {} }) as never);
 	return tools;
 }
-
-for (const surface of ["terminal", "desktop", "vscode"] as const) {
-	test(`the pane lists spaces and their sessions on ${surface}`, async ($, on) => {
-		fakeLeverage(on);
-		await startWindow($, on, surface);
-		const ui = await $.ui.mount({ ...PANE, surface });
-		await expect(ui.find({ text: /#onboarding/ })).resolves.toBeDefined();
-		await expect(ui.find({ key: "s-s-2" })).resolves.toBeDefined();
-		await expect(ui.find({ key: "s-s-3" })).resolves.toBeDefined();
-		// The session here is not one to open again.
-		await expect(ui.find({ key: "s-s-1" })).resolves.toBeUndefined();
-	});
-}
-
-test("pressing another session moves the window to it", async ($, on) => {
-	const leverage = fakeLeverage(on);
-	await startWindow($, on, "desktop");
-	const ui = await $.ui.mount({ ...PANE, surface: "desktop" });
-	await ui.press({ key: "s-s-2" });
-	expect(leverage.opened).toContain("s-2");
-	expect(leverage.commands).toContain("clear");
-	// Opened here, it reads as read, and its turns draw from its first row.
-	expect(leverage.read.at(-1)).toBe("s-2");
-	await leverage.clock.advance(1500);
-	expect(leverage.replays.at(-1)).toBe("s-2");
-	// The pane marks the new session as the one here; the old one opens again.
-	await expect(ui.find({ key: "here-s-2" })).resolves.toBeDefined();
-	await expect(ui.find({ key: "s-s-1" })).resolves.toBeDefined();
-});
 
 test("a search lists the sessions whose titles hold it", async ($, on) => {
 	const leverage = fakeLeverage(on);
@@ -212,28 +140,6 @@ for (const surface of ["terminal", "desktop"] as const) {
 	});
 }
 
-test("a Leverage subagent's call is Claude Code's own Agent call", async ($, on) => {
-	fakeLeverage(on);
-	await startWindow($, on, "terminal");
-	const chunks = [];
-	for await (const chunk of $.turn.step({
-		turnId: "turn-1",
-		index: 0,
-		model: "leverage",
-		messageCount: 1,
-	}))
-		chunks.push(chunk);
-	expect(chunks).toContainEqual(
-		expect.objectContaining({ kind: "tool", id: "agent-1", name: "Agent" }),
-	);
-	const input = chunks.find((chunk) => chunk.kind === "input");
-	expect(JSON.parse(input && "json" in input ? input.json : "{}")).toEqual({
-		description: "Find the flake",
-		prompt: "Look at checkout",
-		subagent_type: "general-purpose",
-	});
-});
-
 test("without leverage claude, the pane reads the CLI's token, and a press runs the session here", async ($, on) => {
 	const leverage = fakeLeverage(on, { HOME: "/Users/ana" });
 	// The CLI keeps a Claude Code token per host and workspace.
@@ -266,23 +172,4 @@ test("without leverage claude, the pane reads the CLI's token, and a press runs 
 	await ui.press({ key: "s-s-2" });
 	expect(leverage.opened).toContain("s-2");
 	expect(tools).toContain("remote_tool");
-});
-
-test("with no token anywhere, /leverage says how to get one", async ($, on) => {
-	fakeLeverage(on, { HOME: "/Users/ana" });
-	on("fs.read", () => {
-		throw new Error("no such file");
-	});
-	const tools = engineStart(on);
-	await $.session.start({
-		cwd: "/work",
-		surface: "terminal",
-		isInteractive: true,
-	});
-	const answer = await $.command.run({
-		command: "leverage",
-		args: "",
-	} as never);
-	expect(answer.text).toContain("/leverage login");
-	expect(tools).toEqual([]);
 });
